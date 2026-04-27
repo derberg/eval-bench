@@ -1,0 +1,6 @@
+- id: say-hi
+  prompt: say hi
+  rubric: score by length
+- id: say-bye
+  prompt: say bye
+  rubric: score by length

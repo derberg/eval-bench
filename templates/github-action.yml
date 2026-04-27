@@ -1,0 +1,46 @@
+name: eval-bench
+
+on:
+  pull_request:
+    paths:
+      - 'skills/**'
+      - 'agents/**'
+      - 'commands/**'
+      - 'hooks/**'
+      - 'mcp/**'
+      - '.claude-plugin/**'
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm i -g @anthropic-ai/claude-code
+      - uses: actions/cache@v4
+        with:
+          path: ~/.ollama/models
+          key: ollama-qwen2.5-14b
+      - run: curl -fsSL https://ollama.com/install.sh | sh
+      - run: |
+          ollama serve &
+          sleep 2
+          ollama pull qwen2.5:14b
+      - run: |
+          npx eval-bench run \
+            --baseline origin/main \
+            --current HEAD \
+            --save-as pr-${{ github.event.pull_request.number }} \
+            --fail-on-regression 0.05
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: benchmark-results
+          path: .evalforge/snapshots/

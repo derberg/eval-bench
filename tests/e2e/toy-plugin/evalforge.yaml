@@ -1,0 +1,15 @@
+plugin:
+  path: ./
+provider:
+  command: node
+  extraArgs: ['fake-claude.js']
+  timeout: 10
+judge:
+  provider: ollama
+  model: q
+  endpoint: JUDGE_URL
+runs:
+  samples: 2
+  parallel: 1
+snapshots:
+  dir: ./snaps

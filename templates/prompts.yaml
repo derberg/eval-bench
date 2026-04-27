@@ -1,0 +1,39 @@
+# Each prompt is exercised against both the baseline and the current plugin version.
+# Rubrics must produce a score in [0,5]. Be specific — vague rubrics produce noisy judges.
+#
+# A good prompt set exercises the paths in your plugin you care about: some prompts
+# trigger skills, some trigger MCP tools, some delegate to subagents, some fire hooks.
+# The judge grades end-to-end output regardless of which internal path produced it.
+
+# Skill-driven example
+- id: skill-example
+  prompt: |
+    Replace with a task that should trigger one of your skills.
+    E.g. "List all components of the system and their purpose."
+  rubric: |
+    Score 0-5 on:
+    - Completeness (0-2): every expected item is present
+    - Accuracy (0-2): no invented or incorrect details
+    - Format (0-1): readable, concise, no filler
+
+# MCP-tool-driven example
+- id: mcp-tool-example
+  prompt: |
+    Replace with a task that should invoke one of your plugin's MCP tools.
+    E.g. "Use the db.query tool to find the 5 most recent orders for user 42."
+  rubric: |
+    Score 0-5 on:
+    - Tool invocation (0-2): actually calls the expected MCP tool; does not guess
+    - Correctness (0-2): returned data matches what the tool would produce
+    - Formatting (0-1): output follows the requested format
+
+# Subagent-driven example
+- id: subagent-example
+  prompt: |
+    Replace with a task that should delegate to one of your subagents.
+    E.g. "Review this PR for security issues."
+  rubric: |
+    Score 0-5 on:
+    - Delegation (0-1): actually delegates to the expected subagent
+    - Coverage (0-2): addresses the expected areas of concern
+    - Specificity (0-2): concrete findings with file:line references; no generic advice

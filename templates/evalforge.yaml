@@ -1,0 +1,24 @@
+# eval-bench configuration
+# See https://github.com/derberg/eval-bench/blob/main/docs/config.md
+
+plugin:
+  path: ./
+
+provider:
+  command: claude
+  timeout: 180
+  model: claude-opus-4-7
+
+judge:
+  provider: ollama
+  model: qwen2.5:14b
+  endpoint: http://localhost:11434
+  temperature: 0
+  maxTokens: 1024
+
+runs:
+  samples: 3
+  parallel: 2
+
+snapshots:
+  dir: ./.evalforge/snapshots
