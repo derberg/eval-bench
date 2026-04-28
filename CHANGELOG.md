@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.2.3 — 2026-04-28
+
+**Fixes:**
+
+- `eb --version` now reports the correct version. Previously hardcoded in `src/index.ts` and went stale on 0.2.1 / 0.2.2 — now derived from `package.json` at runtime so it can never drift.
+
+**Internal:**
+
+- ESLint migrated to v9 flat config (`eslint.config.js`); `npm run lint` actually runs again.
+- `tsconfig.json` pins `"types": ["node"]` so the IDE's TS server reliably loads node type definitions.
+
 ## 0.2.1 — 2026-04-28
 
 **Fixes:**

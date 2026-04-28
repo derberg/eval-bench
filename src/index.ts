@@ -1,1 +1,7 @@
-export const version = '0.2.0';
+import { readFileSync } from 'node:fs';
+
+const pkg = JSON.parse(
+  readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
+) as { version: string };
+
+export const version: string = pkg.version;

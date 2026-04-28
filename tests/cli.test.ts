@@ -10,8 +10,10 @@ describe('cli', () => {
     expect(result.stdout).toMatch(/compare/);
   });
 
-  it('prints version with --version', async () => {
+  it('prints version with --version matching package.json', async () => {
+    const { readFileSync } = await import('node:fs');
+    const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
     const result = await execa('npx', ['tsx', 'src/cli/index.ts', '--version']);
-    expect(result.stdout.trim()).toBe('0.2.0');
+    expect(result.stdout.trim()).toBe(pkg.version);
   });
 });
