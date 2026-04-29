@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.8.1 — 2026-04-29
+
+**Fixes:**
+
+- **`eb view` cell rows align across baseline/current.** The 0.8.0 redesign rendered each variant as its own column, so cells in the left column (`baseline`) and right column (`current`) had independent heights — paired samples (baseline #1 vs current #1) wouldn't sit on the same horizontal line, making side-by-side reading awkward when outputs had different lengths. The variants now share a single 2-column CSS grid, so each row contains the paired baseline + current cell and both stretch to the height of the taller one. Cells flex internally so the judge rationale always sits at the bottom of the cell.
+
 ## 0.8.0 — 2026-04-29
 
 **Features:**

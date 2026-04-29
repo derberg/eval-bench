@@ -135,42 +135,54 @@ function renderHtml(s: Snapshot): string {
     </a>`;
   });
 
+  const renderCell = (r: typeof s.runs[number] | undefined, variant: Variant): string => {
+    if (!r) {
+      return `<div class="cell cell-empty variant-${variant}"><div class="empty-out">no run</div></div>`;
+    }
+    const j = s.judgments.find((x) => x.runId === r.id);
+    const score = j?.score ?? 0;
+    const cls = scoreClass(score);
+    const failed = score === 0 || j?.error != null;
+    const sliced = (r.output ?? '').slice(0, 800);
+    const body = sliced.trim()
+      ? `<pre>${escape(sliced)}</pre>`
+      : '<div class="empty-out">no output</div>';
+    const note = j?.rationale || j?.error || '';
+    return `<div class="cell cell-${cls} variant-${variant}${failed ? ' cell-failed' : ''}">
+      <div class="cell-head">
+        <div class="cell-score">score ${j?.score ?? '-'}</div>
+        ${fmtUsage(r)}
+      </div>
+      ${body}
+      ${note ? `<div class="rat">${escape(note)}</div>` : ''}
+    </div>`;
+  };
+
   const sections = s.prompts.map((p, pi) => {
-    const variants = (['baseline', 'current'] as const).map((v) => {
-      const runs = s.runs.filter((r) => r.promptId === p.id && r.variant === v);
-      const cells = runs
-        .map((r) => {
-          const j = s.judgments.find((x) => x.runId === r.id);
-          const score = j?.score ?? 0;
-          const cls = scoreClass(score);
-          const failed = score === 0 || (j?.error != null);
-          const sliced = (r.output ?? '').slice(0, 800);
-          const body = sliced.trim()
-            ? `<pre>${escape(sliced)}</pre>`
-            : '<div class="empty-out">no output</div>';
-          const note = j?.rationale || j?.error || '';
-          return `<div class="cell cell-${cls}${failed ? ' cell-failed' : ''}">
-            <div class="cell-head">
-              <div class="cell-score">score ${j?.score ?? '-'}</div>
-              ${fmtUsage(r)}
-            </div>
-            ${body}
-            ${note ? `<div class="rat">${escape(note)}</div>` : ''}
-          </div>`;
-        })
-        .join('');
-      return `<div class="variant variant-${v}">
-        <div class="variant-head"><span class="variant-label">${v}</span></div>
-        ${cells || '<div class="variant-empty">no runs</div>'}
-      </div>`;
-    });
+    const baseRuns = s.runs
+      .filter((r) => r.promptId === p.id && r.variant === 'baseline')
+      .sort((a, b) => a.sample - b.sample);
+    const currRuns = s.runs
+      .filter((r) => r.promptId === p.id && r.variant === 'current')
+      .sort((a, b) => a.sample - b.sample);
+    const maxN = Math.max(baseRuns.length, currRuns.length);
+    const pairs: string[] = [];
+    for (let i = 0; i < maxN; i++) {
+      pairs.push(renderCell(baseRuns[i], 'baseline'));
+      pairs.push(renderCell(currRuns[i], 'current'));
+    }
+    const grid = maxN
+      ? `<div class="variant-head variant-baseline"><span class="variant-label">baseline</span></div>
+         <div class="variant-head variant-current"><span class="variant-label">current</span></div>
+         ${pairs.join('')}`
+      : '<div class="variant-empty" style="grid-column:1/-1">no runs</div>';
     return `<section id="p-${escape(p.id)}" style="--i:${pi}">
       <header class="sect-head">
         <span class="sect-tag">prompt ${pi + 1} / ${s.prompts.length}</span>
         <h3>${escape(p.id)}</h3>
       </header>
       <div class="prompt"><pre>${escape(p.prompt).trim()}</pre></div>
-      <div class="variants">${variants.join('')}</div>
+      <div class="variants">${grid}</div>
     </section>`;
   });
 
@@ -323,14 +335,15 @@ section h3{font-family:'Instrument Serif',serif;font-style:italic;font-weight:40
 .prompt{background:linear-gradient(to right, rgba(224,200,156,0.05), transparent);border-left:2px solid var(--accent);padding:1em 1.4em;margin:0 0 1.4em;font-size:12px;color:var(--fg-soft)}
 .prompt pre{margin:0;white-space:pre-wrap;font-family:'JetBrains Mono',monospace;line-height:1.6}
 
-.variants{display:grid;grid-template-columns:1fr 1fr;gap:1em}
-.variant-head{font-size:10px;letter-spacing:0.28em;text-transform:uppercase;color:var(--mute);margin-bottom:0.6em;display:flex;align-items:center;gap:0.8em}
+.variants{display:grid;grid-template-columns:1fr 1fr;gap:0.7em 1em;align-items:stretch}
+.variant-head{font-size:10px;letter-spacing:0.28em;text-transform:uppercase;color:var(--mute);display:flex;align-items:center;gap:0.8em;margin-bottom:-0.2em}
 .variant-head::after{content:'';flex:1;height:1px;background:var(--line-soft)}
 .variant-label{padding:0.28em 0.75em;border:1px solid var(--line);background:var(--bg-elev)}
-.variant-baseline .variant-label{color:var(--fg-soft)}
-.variant-current .variant-label{color:var(--accent);border-color:var(--accent);background:rgba(224,200,156,0.06)}
+.variant-head.variant-baseline .variant-label{color:var(--fg-soft)}
+.variant-head.variant-current .variant-label{color:var(--accent);border-color:var(--accent);background:rgba(224,200,156,0.06)}
 
-.cell{background:var(--bg-cell);border:1px solid var(--line-soft);margin-bottom:0.7em;padding:0.95em 1.05em;position:relative;border-left:3px solid var(--mute)}
+.cell{background:var(--bg-cell);border:1px solid var(--line-soft);padding:0.95em 1.05em;position:relative;border-left:3px solid var(--mute);display:flex;flex-direction:column;height:100%}
+.cell-empty{justify-content:center;align-items:center;border-style:dashed;border-left-style:dashed;background:transparent}
 .cell-great{border-left-color:var(--good)}
 .cell-ok{border-left-color:var(--accent)}
 .cell-meh{border-left-color:var(--warn)}
@@ -344,9 +357,9 @@ section h3{font-family:'Instrument Serif',serif;font-style:italic;font-weight:40
 .cell-meh .cell-score{color:var(--warn)}
 .cell-bad .cell-score,.cell-fail .cell-score{color:var(--bad)}
 .cell-tok{font-size:10px;color:var(--mute);letter-spacing:0.04em;font-variant-numeric:tabular-nums}
-.cell pre{white-space:pre-wrap;font-size:12px;margin:0;color:var(--fg);line-height:1.55}
+.cell pre{white-space:pre-wrap;font-size:12px;margin:0;color:var(--fg);line-height:1.55;flex:0 0 auto}
 .empty-out{font-family:'Instrument Serif',serif;font-style:italic;color:var(--bad);font-size:16px;padding:0.4em 0}
-.rat{margin-top:0.8em;padding-top:0.7em;border-top:1px dashed var(--line);font-size:11px;color:var(--fg-soft);line-height:1.55}
+.rat{margin-top:auto;padding-top:0.7em;border-top:1px dashed var(--line);font-size:11px;color:var(--fg-soft);line-height:1.55}
 .rat::before{content:'JUDGE';display:inline-block;font-size:9px;letter-spacing:0.2em;color:var(--mute);margin-right:0.6em;padding:0.1em 0.4em;border:1px solid var(--line)}
 .variant-empty{padding:2em;color:var(--mute);text-align:center;font-size:11px;letter-spacing:0.16em;text-transform:uppercase;border:1px dashed var(--line)}
 
