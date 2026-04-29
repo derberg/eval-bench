@@ -39,6 +39,27 @@ export async function listSnapshots(dir: string): Promise<string[]> {
   }
 }
 
+// Drop runs whose underlying call failed (plus their judgments) so the resume
+// path can re-execute exactly those rows. Other judge-only failures are left
+// alone — runBenchmark already retries those automatically on resume.
+export function pruneFailedRuns(snap: Snapshot): {
+  snap: Snapshot;
+  prunedRuns: number;
+  prunedJudgments: number;
+} {
+  const failedRunIds = new Set(snap.runs.filter((r) => r.error !== null).map((r) => r.id));
+  if (failedRunIds.size === 0) {
+    return { snap, prunedRuns: 0, prunedJudgments: 0 };
+  }
+  const keptRuns = snap.runs.filter((r) => !failedRunIds.has(r.id));
+  const keptJudgments = snap.judgments.filter((j) => !failedRunIds.has(j.runId));
+  return {
+    snap: { ...snap, runs: keptRuns, judgments: keptJudgments, complete: false },
+    prunedRuns: snap.runs.length - keptRuns.length,
+    prunedJudgments: snap.judgments.length - keptJudgments.length,
+  };
+}
+
 export async function removeSnapshot(dir: string, name: string): Promise<void> {
   validateName(name);
   const target = resolve(dir, name);

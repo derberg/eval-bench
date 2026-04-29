@@ -41,6 +41,7 @@ program
   .option('--compare <name>', 'After running, compare against this snapshot')
   .option('--fail-on-regression <n>', 'Exit nonzero if net score drops more than <n>', parseFloat)
   .option('--force', 'Overwrite an existing complete snapshot with the same --save-as name')
+  .option('--retry-failed', 'Re-run only failed rows in the existing snapshot (preserves successes)')
   .option('--dry-run', 'Print planned matrix without running')
   .option('-v, --verbose')
   .action(async (opts) => {
@@ -60,6 +61,7 @@ program
       compare: opts.compare,
       failOnRegression: opts.failOnRegression,
       force: Boolean(opts.force),
+      retryFailed: Boolean(opts.retryFailed),
       dryRun: opts.dryRun,
       verbose: opts.verbose,
     });
@@ -76,6 +78,7 @@ program
   .option('--config <file>', 'Config file', './.eval-bench/eval-bench.yaml')
   .option('--judge <spec>', 'Override judge, e.g. ollama:qwen2.5:14b')
   .option('--force', 'Overwrite an existing complete snapshot with the same name')
+  .option('--retry-failed', 'Re-run only failed rows in the existing snapshot (preserves successes)')
   .option(
     '--only <ids>',
     'Run only these prompt ids (comma-separated, repeatable)',
@@ -96,6 +99,7 @@ program
       judge: opts.judge,
       saveAs: opts.saveAs,
       force: Boolean(opts.force),
+      retryFailed: Boolean(opts.retryFailed),
       only: opts.only,
       dryRun: opts.dryRun,
     });

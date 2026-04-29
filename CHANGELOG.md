@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.5.2 — 2026-04-29
+
+**Features:**
+
+- **`--retry-failed` on `eb run` and `eb eval`.** Re-runs only the rows whose underlying Claude call errored in an existing snapshot (`run.error !== null`); successful rows are kept verbatim. Resolves the "I lost a few runs to a judge timeout yesterday — how do I top up without redoing all 30?" case. Mutually exclusive with `--force`. Errors clearly if the snapshot doesn't exist or has no failures (the latter short-circuits with exit 0).
+
+**Internals:**
+
+- `pruneFailedRuns(snap)` exported from `src/snapshot.ts` — drops failed runs and their judgments, sets `complete: false`, returns counts. The CLI feeds the result to the existing resume path, which already knows how to re-execute the now-missing rows.
+
 ## 0.5.1 — 2026-04-29
 
 **Fixes:**

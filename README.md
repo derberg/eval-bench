@@ -76,6 +76,9 @@ eb run --baseline-from v1-baseline --save-as wip --compare v1-baseline
 # narrow the matrix to one or a few prompts while iterating on a rubric
 eb run --baseline-from v1-baseline --save-as wip --only find-user-by-email
 
+# a few rows failed yesterday (judge timeout, quota)? re-run only those
+eb run --baseline main --save-as baseline --retry-failed
+
 # side-by-side outputs in the browser
 eb view wip
 ```

@@ -1,7 +1,7 @@
 import { loadConfig } from '../config.js';
 import { loadPrompts, filterPrompts } from '../prompts.js';
 import { runBenchmark } from '../run.js';
-import { saveSnapshot, loadSnapshot } from '../snapshot.js';
+import { saveSnapshot, loadSnapshot, pruneFailedRuns } from '../snapshot.js';
 import { createWorktree, resolveSha } from '../swap.js';
 import { compareSnapshots, formatComparisonMarkdown } from '../compare.js';
 import { info, ok, warn, err, progress } from '../logger.js';
@@ -22,6 +22,7 @@ export interface RunOptions {
   compare?: string;
   failOnRegression?: number;
   force?: boolean;
+  retryFailed?: boolean;
   dryRun?: boolean;
   verbose?: boolean;
 }
@@ -43,6 +44,10 @@ function applyOverrides(cfg: Config, opts: RunOptions): Config {
 export async function runCommand(opts: RunOptions): Promise<number> {
   if (opts.baselineFrom && opts.baseline) {
     err('--baseline-from and --baseline are mutually exclusive');
+    return 1;
+  }
+  if (opts.retryFailed && opts.force) {
+    err('--retry-failed and --force are mutually exclusive');
     return 1;
   }
   const configPath = opts.config ?? '.eval-bench/eval-bench.yaml';
@@ -115,23 +120,39 @@ export async function runCommand(opts: RunOptions): Promise<number> {
   if (opts.dryRun) return 0;
 
   let resume: Snapshot | null = null;
+  let existing: Snapshot | null = null;
   try {
-    const existing = await loadSnapshot(cfg.snapshots.dir, name);
-    if (existing.complete === false) {
+    existing = await loadSnapshot(cfg.snapshots.dir, name);
+  } catch {
+    // no existing snapshot — fresh run
+  }
+  if (existing) {
+    if (opts.retryFailed) {
+      const pruned = pruneFailedRuns(existing);
+      if (pruned.prunedRuns === 0) {
+        info(`No failed runs to retry in snapshot "${name}" — nothing to do`);
+        return 0;
+      }
+      resume = pruned.snap;
+      info(
+        `Retrying ${pruned.prunedRuns} failed run${pruned.prunedRuns === 1 ? '' : 's'} in snapshot "${name}" (${pruned.snap.runs.length} successful runs preserved)`,
+      );
+    } else if (existing.complete === false) {
       resume = existing;
       info(
         `Resuming from partial snapshot: ${existing.runs.length} runs, ${existing.judgments.length} judgments already done`,
       );
     } else if (!opts.force) {
       err(
-        `Snapshot "${name}" already exists. Re-run with --force to overwrite, or use a different --save-as name. To retry failed rows from a complete snapshot, delete it first: eb snapshot rm ${name}`,
+        `Snapshot "${name}" already exists. Re-run with --force to overwrite, --retry-failed to re-run only failed rows, or use a different --save-as name.`,
       );
       return 1;
     } else {
       warn(`Overwriting existing snapshot "${name}" (--force)`);
     }
-  } catch {
-    // no existing snapshot — fresh run
+  } else if (opts.retryFailed) {
+    err(`No snapshot named "${name}" — nothing to retry.`);
+    return 1;
   }
 
   if (cachedBaseline) {

@@ -1,7 +1,7 @@
 import { loadConfig } from '../config.js';
 import { loadPrompts, filterPrompts } from '../prompts.js';
 import { runBenchmark } from '../run.js';
-import { saveSnapshot, loadSnapshot } from '../snapshot.js';
+import { saveSnapshot, loadSnapshot, pruneFailedRuns } from '../snapshot.js';
 import { resolveSha } from '../swap.js';
 import { info, ok, warn, err, progress } from '../logger.js';
 import type { Config, Snapshot } from '../types.js';
@@ -15,6 +15,7 @@ export interface EvalOptions {
   judge?: string;
   saveAs: string;
   force?: boolean;
+  retryFailed?: boolean;
   only?: string[];
   dryRun?: boolean;
 }
@@ -33,6 +34,10 @@ function applyOverrides(cfg: Config, opts: EvalOptions): Config {
 }
 
 export async function evalCommand(opts: EvalOptions): Promise<number> {
+  if (opts.retryFailed && opts.force) {
+    err('--retry-failed and --force are mutually exclusive');
+    return 1;
+  }
   const configPath = opts.config ?? '.eval-bench/eval-bench.yaml';
   const promptsPath = opts.prompts ?? '.eval-bench/prompts.yaml';
   const cfg = applyOverrides(loadConfig(configPath), opts);
@@ -52,21 +57,39 @@ export async function evalCommand(opts: EvalOptions): Promise<number> {
   if (opts.dryRun) return 0;
 
   let resume: Snapshot | null = null;
+  let existing: Snapshot | null = null;
   try {
-    const existing = await loadSnapshot(cfg.snapshots.dir, name);
-    if (existing.complete === false) {
+    existing = await loadSnapshot(cfg.snapshots.dir, name);
+  } catch {
+    // no existing snapshot — fresh run
+  }
+  if (existing) {
+    if (opts.retryFailed) {
+      const pruned = pruneFailedRuns(existing);
+      if (pruned.prunedRuns === 0) {
+        info(`No failed runs to retry in snapshot "${name}" — nothing to do`);
+        return 0;
+      }
+      resume = pruned.snap;
+      info(
+        `Retrying ${pruned.prunedRuns} failed run${pruned.prunedRuns === 1 ? '' : 's'} in snapshot "${name}" (${pruned.snap.runs.length} successful runs preserved)`,
+      );
+    } else if (existing.complete === false) {
       resume = existing;
       info(
         `Resuming from partial snapshot: ${existing.runs.length} runs, ${existing.judgments.length} judgments already done`,
       );
     } else if (!opts.force) {
-      err(`Snapshot "${name}" already exists. Re-run with --force to overwrite.`);
+      err(
+        `Snapshot "${name}" already exists. Re-run with --force to overwrite, --retry-failed to re-run only failed rows, or use a different --save-as name.`,
+      );
       return 1;
     } else {
       warn(`Overwriting existing snapshot "${name}" (--force)`);
     }
-  } catch {
-    // no existing snapshot — fresh run
+  } else if (opts.retryFailed) {
+    err(`No snapshot named "${name}" — nothing to retry.`);
+    return 1;
   }
 
   const sha = await resolveSha(gitRoot, ref);
