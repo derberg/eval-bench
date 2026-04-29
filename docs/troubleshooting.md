@@ -83,6 +83,12 @@ If the snapshot has no failures, the command short-circuits with `No failed runs
 
 **`eb run --baseline-from <name>`** loads `<name>`'s runs into the new snapshot's baseline slot at startup. If the new snapshot's name later resumes, those baseline rows are already on disk in the partial snapshot — the cache load is idempotent.
 
+## Generated files leaking into the repo working tree
+
+`eb` runs each Claude invocation in a per-sample working dir under the snapshot — by default `{{snapshots_dir}}/{{snapshot_name}}/{{variant}}/{{prompt_id}}/{{sample}}` — so any files the model writes land alongside `snapshot.json` rather than your repo. The resolved path is recorded on `runs[].cwd` in `snapshot.json` so you can find the artifacts after the fact.
+
+If files are still leaking into your repo, you've likely set `provider.cwd: null` in `eval-bench.yaml`, which opts back into the legacy "inherit `eb`'s cwd" behavior. Either remove that line to use the default, or pick a different template — see [config.md](config.md#cwd--per-sample-working-directory) for the full variable list.
+
 ## Worktree cleanup left a directory in /tmp
 
 If the tool crashes mid-run, the temp worktree may not get cleaned up. Run `git worktree prune` in your plugin repo and `rm -rf /tmp/ef-wt-*`.

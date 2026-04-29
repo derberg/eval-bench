@@ -8,6 +8,12 @@ provider:
   command: claude
   timeout: 180
   model: claude-opus-4-7
+  # Each Claude run gets its own working dir under the snapshot. By default
+  # that's "{{snapshots_dir}}/{{snapshot_name}}/{{variant}}/{{prompt_id}}/{{sample}}",
+  # so any files the model writes land alongside snapshot.json instead of in
+  # your repo. Override with a custom path template, or set `cwd: null` to
+  # inherit the cwd of the `eb` process (legacy behavior).
+  # cwd: "{{snapshots_dir}}/{{snapshot_name}}/{{variant}}/{{prompt_id}}/{{sample}}"
 
 judge:
   provider: ollama

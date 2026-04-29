@@ -26,7 +26,31 @@ provider:
   timeout: 180             # seconds per prompt; default: 180
   model: claude-opus-4-7   # passed via --model; null for default
   allowedTools: null       # array of tool names, or null (default)
+  cwd: "{{snapshots_dir}}/{{snapshot_name}}/{{variant}}/{{prompt_id}}/{{sample}}"  # default
 ```
+
+#### `cwd` — per-sample working directory
+
+Each Claude invocation runs in its own directory so any files the model writes (`.likec4` diagrams, generated code, scratch outputs) land alongside `snapshot.json` instead of polluting your repo. The directory is created on first use, and the resolved path is recorded on every run in `snapshot.json` (`runs[].cwd`) so judges and post-hoc inspection can find the artifacts.
+
+The default — `{{snapshots_dir}}/{{snapshot_name}}/{{variant}}/{{prompt_id}}/{{sample}}` — drops artifacts as siblings of the snapshot's `snapshot.json`. Override it with any path template you like.
+
+Supported template variables:
+
+| variable             | resolves to                                                       |
+| -------------------- | ----------------------------------------------------------------- |
+| `{{snapshots_dir}}`  | `snapshots.dir` from this config                                  |
+| `{{snapshot_name}}`  | the `--save-as` name for this run                                 |
+| `{{variant}}`        | `baseline` or `current`                                           |
+| `{{prompt_id}}`      | the prompt's `id` from `prompts.yaml`                             |
+| `{{sample}}`         | 1-based sample number for this row                                |
+| `{{plugin_dir}}`     | the plugin directory the row is running against (per variant)    |
+
+Notes:
+- Relative paths resolve against the `eb` process cwd.
+- The recorded path is canonical (after `realpath`), so macOS `/var/folders` shows up as `/private/var/folders`.
+- Set `cwd: null` to opt out and inherit the cwd of the `eb` process (legacy behavior — files the model writes land in your repo).
+- Unrecognized `{{vars}}` pass through verbatim, so a typo surfaces as a literal directory name rather than silently substituting empty.
 
 ### judge
 

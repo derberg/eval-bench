@@ -1,5 +1,5 @@
 import { execa } from 'execa';
-import { access, mkdir, writeFile, readdir, symlink } from 'node:fs/promises';
+import { access, mkdir, realpath, writeFile, readdir, symlink } from 'node:fs/promises';
 import { join, basename, relative } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
@@ -13,6 +13,9 @@ export interface InvokeClaudeOptions {
   timeoutMs: number;
   model: string | null;
   allowedTools: string[] | null;
+  // Absolute path to spawn the provider in. Created if missing. Null = inherit
+  // the parent process cwd (legacy behavior).
+  cwd: string | null;
 }
 
 export interface InvokeClaudeResult {
@@ -21,6 +24,10 @@ export interface InvokeClaudeResult {
   durationMs: number;
   error: string | null;
   usage: RunUsage | null;
+  // Canonical absolute cwd the child actually ran in (after realpath so
+  // macOS /var/folders → /private/var/folders is normalized). Null when no
+  // cwd was configured.
+  cwd: string | null;
 }
 
 interface ClaudeJsonResult {
@@ -185,11 +192,20 @@ export async function invokeClaude(opts: InvokeClaudeOptions): Promise<InvokeCla
     if (opts.allowedTools && opts.allowedTools.length > 0) {
       args.push('--allowed-tools', opts.allowedTools.join(','));
     }
+    let canonicalCwd: string | null = null;
+    if (opts.cwd) {
+      await mkdir(opts.cwd, { recursive: true });
+      // Canonicalize so the recorded path matches what process.cwd() returns
+      // inside the child (macOS /var/folders → /private/var/folders, symlinked
+      // workspaces, etc.).
+      canonicalCwd = await realpath(opts.cwd);
+    }
     const started = Date.now();
     try {
       const result = await execa(opts.command, args, {
         timeout: opts.timeoutMs,
         reject: false,
+        cwd: canonicalCwd ?? undefined,
         env: {
           ...process.env,
           EVAL_BENCH_PLUGIN_DIR: effectivePluginDir,
@@ -203,7 +219,14 @@ export async function invokeClaude(opts: InvokeClaudeOptions): Promise<InvokeCla
         : [rawStdout, result.stderr].filter(Boolean).join('\n');
       const usage = parsed?.usage ?? null;
       if (result.timedOut) {
-        return { output, exitCode: result.exitCode ?? -1, durationMs, error: 'timed out', usage };
+        return {
+          output,
+          exitCode: result.exitCode ?? -1,
+          durationMs,
+          error: 'timed out',
+          usage,
+          cwd: canonicalCwd,
+        };
       }
       if (result.exitCode !== 0) {
         return {
@@ -212,13 +235,21 @@ export async function invokeClaude(opts: InvokeClaudeOptions): Promise<InvokeCla
           durationMs,
           error: result.stderr || 'non-zero exit',
           usage,
+          cwd: canonicalCwd,
         };
       }
-      return { output, exitCode: 0, durationMs, error: null, usage };
+      return { output, exitCode: 0, durationMs, error: null, usage, cwd: canonicalCwd };
     } catch (err) {
       const durationMs = Date.now() - started;
       const msg = err instanceof Error ? err.message : String(err);
-      return { output: '', exitCode: -1, durationMs, error: msg, usage: null };
+      return {
+        output: '',
+        exitCode: -1,
+        durationMs,
+        error: msg,
+        usage: null,
+        cwd: canonicalCwd,
+      };
     }
   } finally {
     // Clean up temp plugin if it was created

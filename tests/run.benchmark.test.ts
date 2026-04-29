@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { chmodSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { chmodSync, existsSync, mkdtempSync, realpathSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { createServer, type Server } from 'node:http';
 import { runBenchmark } from '../src/run.js';
 import type { Config, PromptSpec, Snapshot } from '../src/types.js';
@@ -37,7 +38,9 @@ afterAll(async () => {
 });
 
 const fakeClaude = resolve('tests/fixtures/fake-claude.js');
+const fakeClaudeCwd = resolve('tests/fixtures/fake-claude-cwd.js');
 chmodSync(fakeClaude, 0o755);
+chmodSync(fakeClaudeCwd, 0o755);
 
 const prompts: PromptSpec[] = [{ id: 'p1', prompt: 'x', rubric: 'r' }];
 
@@ -50,6 +53,7 @@ function baseConfig(): Config {
       timeout: 30,
       model: null,
       allowedTools: null,
+      cwd: null,
     },
     judge: {
       provider: 'ollama',
@@ -170,6 +174,63 @@ describe('runBenchmark', () => {
     expect(partials.every((p) => p.complete === false)).toBe(true);
     expect(partials.at(-1)!.runs).toHaveLength(4);
     expect(snap.complete).toBe(true);
+  });
+
+  it('spawns each row under the snapshot dir using the default cwd template, separating baseline and current by variant', async () => {
+    judgeMode = 'ok';
+    const snapsRoot = mkdtempSync(join(tmpdir(), 'ef-snaps-'));
+    const cfg = baseConfig();
+    cfg.provider.extraArgs = [fakeClaudeCwd];
+    // Default template, the same one zod applies when cwd is omitted.
+    cfg.provider.cwd =
+      '{{snapshots_dir}}/{{snapshot_name}}/{{variant}}/{{prompt_id}}/{{sample}}';
+    cfg.snapshots.dir = snapsRoot;
+    cfg.runs.samples = 1;
+    const snap = await runBenchmark({
+      config: cfg,
+      prompts,
+      baselinePluginDir: '/tmp/a',
+      currentPluginDir: '/tmp/b',
+      baselineRef: 'v1',
+      baselineSha: 'abc',
+      currentRef: 'HEAD',
+      currentSha: 'def',
+      name: 'wip',
+    });
+    expect(snap.runs).toHaveLength(2);
+    // Recorded cwd is canonical (realpath-resolved); compare against the
+    // realpath of the snapshots root so macOS symlinks don't trip the test.
+    const canonicalSnapsRoot = realpathSync(snapsRoot);
+    for (const r of snap.runs) {
+      expect(r.cwd).not.toBeNull();
+      // Every cwd lives under the per-snapshot subdir, namespaced by
+      // variant/prompt/sample.
+      expect(r.cwd!.startsWith(`${canonicalSnapsRoot}/wip/`)).toBe(true);
+      expect(r.cwd).toContain(`/${r.variant}/${r.promptId}/${r.sample}`);
+      // Provider actually ran there; the fake-claude-cwd fixture writes a
+      // marker file at process.cwd() and echoes it.
+      expect(existsSync(join(r.cwd!, 'artifact.txt'))).toBe(true);
+      expect(r.output).toContain(`[CWD=${r.cwd}]`);
+    }
+    // Baseline and current land in distinct dirs thanks to {{variant}}.
+    const cwds = new Set(snap.runs.map((r) => r.cwd));
+    expect(cwds.size).toBe(snap.runs.length);
+  });
+
+  it('opts out of the per-sample cwd when provider.cwd is null (legacy behavior)', async () => {
+    judgeMode = 'ok';
+    const snap = await runBenchmark({
+      config: baseConfig(),
+      prompts,
+      baselinePluginDir: '/tmp/a',
+      currentPluginDir: '/tmp/b',
+      baselineRef: 'v1',
+      baselineSha: 'abc',
+      currentRef: 'HEAD',
+      currentSha: 'def',
+      name: 'test-no-cwd',
+    });
+    expect(snap.runs.every((r) => r.cwd === null)).toBe(true);
   });
 
   it('skips already-completed rows when resuming', async () => {

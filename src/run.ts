@@ -1,3 +1,4 @@
+import { resolve as resolvePath } from 'node:path';
 import type {
   PromptSpec,
   Variant,
@@ -11,6 +12,35 @@ import type {
 import { invokeClaude } from './provider.js';
 import { judge, judgeConfigFromConfig, type JudgeConfig } from './judges/index.js';
 import { hashRubric } from './judges/rubric.js';
+
+interface CwdContext {
+  snapshotsDir: string;
+  snapshotName: string;
+  variant: Variant;
+  promptId: string;
+  sample: number;
+  pluginDir: string;
+}
+
+// Substitute the supported template variables in `provider.cwd`. Returns an
+// absolute path or null if the template was explicitly set to null. Unknown
+// {{vars}} pass through untouched so a typo surfaces as a directory name
+// rather than silently substituting empty.
+export function resolveCwd(template: string | null, ctx: CwdContext): string | null {
+  if (!template) return null;
+  const subs: Record<string, string> = {
+    snapshots_dir: ctx.snapshotsDir,
+    snapshot_name: ctx.snapshotName,
+    variant: ctx.variant,
+    prompt_id: ctx.promptId,
+    sample: String(ctx.sample),
+    plugin_dir: ctx.pluginDir,
+  };
+  const rendered = template.replace(/\{\{\s*([a-z_]+)\s*\}\}/g, (match, name: string) =>
+    Object.prototype.hasOwnProperty.call(subs, name) ? subs[name] : match,
+  );
+  return resolvePath(rendered);
+}
 
 export interface MatrixRow {
   id: string;
@@ -221,6 +251,14 @@ async function runAndJudge(
   opts.onProgress?.({ kind: 'run-start', rowId: row.id });
   const pluginDir =
     row.variant === 'baseline' ? opts.baselinePluginDir : opts.currentPluginDir;
+  const cwd = resolveCwd(opts.config.provider.cwd, {
+    snapshotsDir: opts.config.snapshots.dir,
+    snapshotName: opts.name,
+    variant: row.variant,
+    promptId: row.promptId,
+    sample: row.sample,
+    pluginDir,
+  });
   const r = await invokeClaude({
     command: opts.config.provider.command,
     extraArgs: opts.config.provider.extraArgs,
@@ -229,6 +267,7 @@ async function runAndJudge(
     timeoutMs: opts.config.provider.timeout * 1000,
     model: opts.config.provider.model,
     allowedTools: opts.config.provider.allowedTools,
+    cwd,
   });
   opts.onProgress?.({
     kind: 'run-end',
@@ -246,6 +285,9 @@ async function runAndJudge(
     exitCode: r.exitCode,
     error: r.error,
     usage: r.usage,
+    // r.cwd is canonical (post-realpath); fall back to the templated value
+    // when realpath couldn't run (no cwd configured).
+    cwd: r.cwd ?? cwd,
   };
   const judgment = await judgeRun(row, run, judgeCfg, opts.onProgress);
   return { run, judgment };

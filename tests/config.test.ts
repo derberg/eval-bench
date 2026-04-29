@@ -63,4 +63,40 @@ judge:
     const cfg = loadConfig(path);
     expect(cfg.judge.provider).toBe('anthropic');
   });
+
+  it('defaults provider.cwd to a per-sample template under the snapshot dir', () => {
+    const path = writeTempYaml(`
+judge:
+  provider: anthropic
+  model: claude-opus-4-7
+`);
+    const cfg = loadConfig(path);
+    expect(cfg.provider.cwd).toBe(
+      '{{snapshots_dir}}/{{snapshot_name}}/{{variant}}/{{prompt_id}}/{{sample}}',
+    );
+  });
+
+  it('accepts an explicit cwd: null as opt-out of the per-sample default', () => {
+    const path = writeTempYaml(`
+judge:
+  provider: anthropic
+  model: claude-opus-4-7
+provider:
+  cwd: null
+`);
+    const cfg = loadConfig(path);
+    expect(cfg.provider.cwd).toBeNull();
+  });
+
+  it('preserves provider.cwd template verbatim (no early substitution)', () => {
+    const path = writeTempYaml(`
+judge:
+  provider: anthropic
+  model: claude-opus-4-7
+provider:
+  cwd: "{{snapshots_dir}}/runs/{{prompt_id}}-{{sample}}"
+`);
+    const cfg = loadConfig(path);
+    expect(cfg.provider.cwd).toBe('{{snapshots_dir}}/runs/{{prompt_id}}-{{sample}}');
+  });
 });

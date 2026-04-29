@@ -18,6 +18,12 @@ export interface Config {
     timeout: number;
     model: string | null;
     allowedTools: string[] | null;
+    // Path template for the working directory each Claude invocation runs in.
+    // Supports {{snapshots_dir}}, {{snapshot_name}}, {{variant}}, {{prompt_id}},
+    // {{sample}}, {{plugin_dir}}. Default colocates artifacts under the
+    // snapshot's own dir; set explicitly to null to opt out and inherit the
+    // parent process cwd (legacy behavior).
+    cwd: string | null;
   };
   judge: {
     provider: JudgeProvider;
@@ -64,6 +70,9 @@ export interface RunResult {
   // Null when the provider didn't return parseable JSON usage (e.g. custom
   // command, older snapshots loaded from disk).
   usage: RunUsage | null;
+  // Resolved absolute working directory for this run. Null means the parent
+  // process cwd was used (no provider.cwd configured).
+  cwd: string | null;
 }
 
 export interface TokenTotals {

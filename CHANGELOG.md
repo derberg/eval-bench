@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.6.0 — 2026-04-29
+
+**Features:**
+
+- **`provider.cwd` — per-sample working directory (default on).** Each Claude invocation now spawns in its own dir under the snapshot, so any files the model writes (`.likec4` diagrams, generated code, scratch outputs) land alongside `snapshot.json` instead of leaking into your repo working tree. Default template: `{{snapshots_dir}}/{{snapshot_name}}/{{variant}}/{{prompt_id}}/{{sample}}`. Override with any path string built from `{{snapshots_dir}}`, `{{snapshot_name}}`, `{{variant}}`, `{{prompt_id}}`, `{{sample}}`, `{{plugin_dir}}`. Set `cwd: null` to opt back into the legacy "inherit `eb`'s cwd" behavior.
+- **`runs[].cwd` recorded in snapshots** — the resolved (canonical, post-`realpath`) absolute path for every run is stored on `RunResult.cwd`, so judges and post-hoc inspection can locate each row's artifacts.
+
+**Schema:**
+
+- `Config.provider.cwd: string | null` — path template; default colocates artifacts under the snapshot dir (see above).
+- `RunResult.cwd: string | null` — null only when `provider.cwd` is explicitly null. Old snapshots load unchanged (treated as null).
+
+**Compatibility:**
+
+- Existing configs without `provider.cwd` opt into the new default automatically. If you'd been relying on Claude inheriting `eb`'s cwd (e.g. tests that assert artifacts at the project root), set `provider.cwd: null` in `eval-bench.yaml` to restore the old behavior.
+
 ## 0.5.3 — 2026-04-29
 
 **Fixes:**

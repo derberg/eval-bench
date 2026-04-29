@@ -30,6 +30,7 @@ function mkRun(
     exitCode: 0,
     error: null,
     usage: null,
+    cwd: null,
   };
 }
 

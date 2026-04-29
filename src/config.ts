@@ -18,6 +18,10 @@ const ConfigSchema = z
         timeout: z.number().int().positive().default(180),
         model: z.string().nullable().default(null),
         allowedTools: z.array(z.string()).nullable().default(null),
+        cwd: z
+          .string()
+          .nullable()
+          .default('{{snapshots_dir}}/{{snapshot_name}}/{{variant}}/{{prompt_id}}/{{sample}}'),
       })
       .default({}),
     judge: z.object({
