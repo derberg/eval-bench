@@ -167,12 +167,12 @@ describe('--retry-failed', () => {
     const repo = await makeRepo();
     writeSnapshotWithOneFailure(repo, 'baseline');
 
-    const { exitCode, stdout } = await execa(
+    const { exitCode, stdout, stderr } = await execa(
       'npx',
       ['tsx', cliPath, 'eval', '--save-as', 'baseline', '--retry-failed', ...sharedArgs],
       { cwd: repo, reject: false },
     );
-    expect(exitCode).toBe(0);
+    expect(exitCode, `stderr:\n${stderr}\nstdout:\n${stdout}`).toBe(0);
     expect(stdout).toMatch(/Retrying 1 failed run/);
 
     const snap: Snapshot = JSON.parse(
