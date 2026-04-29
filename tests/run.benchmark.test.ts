@@ -153,6 +153,63 @@ describe('runBenchmark', () => {
     expect(recovered.judgments.every((j) => j.score === 4)).toBe(true);
   });
 
+  it('emits matrix-built so callers can size their progress bar correctly', async () => {
+    judgeMode = 'fail';
+    const failed = await runBenchmark({
+      config: baseConfig(),
+      prompts,
+      baselinePluginDir: '/tmp/a',
+      currentPluginDir: '/tmp/b',
+      baselineRef: 'v1',
+      baselineSha: 'abc',
+      currentRef: 'HEAD',
+      currentSha: 'def',
+      name: 'test-matrix-built',
+    });
+
+    // Fresh run: 4 fresh rows, 0 rejudge
+    judgeMode = 'ok';
+    let freshEvent: { freshRows: number; reJudgeRows: number } | null = null;
+    await runBenchmark({
+      config: baseConfig(),
+      prompts,
+      baselinePluginDir: '/tmp/a',
+      currentPluginDir: '/tmp/b',
+      baselineRef: 'v1',
+      baselineSha: 'abc',
+      currentRef: 'HEAD',
+      currentSha: 'def',
+      name: 'test-matrix-built-fresh',
+      onProgress: (ev) => {
+        if (ev.kind === 'matrix-built') {
+          freshEvent = { freshRows: ev.freshRows, reJudgeRows: ev.reJudgeRows };
+        }
+      },
+    });
+    expect(freshEvent).toEqual({ freshRows: 4, reJudgeRows: 0 });
+
+    // Resume against the failed snapshot: 0 fresh, 4 rejudge
+    let resumeEvent: { freshRows: number; reJudgeRows: number } | null = null;
+    await runBenchmark({
+      config: baseConfig(),
+      prompts,
+      baselinePluginDir: '/tmp/a',
+      currentPluginDir: '/tmp/b',
+      baselineRef: 'v1',
+      baselineSha: 'abc',
+      currentRef: 'HEAD',
+      currentSha: 'def',
+      name: 'test-matrix-built-resume',
+      resume: failed,
+      onProgress: (ev) => {
+        if (ev.kind === 'matrix-built') {
+          resumeEvent = { freshRows: ev.freshRows, reJudgeRows: ev.reJudgeRows };
+        }
+      },
+    });
+    expect(resumeEvent).toEqual({ freshRows: 0, reJudgeRows: 4 });
+  });
+
   it('checkpoints partial state after each row', async () => {
     judgeMode = 'ok';
     const partials: Snapshot[] = [];

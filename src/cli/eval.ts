@@ -95,8 +95,9 @@ export async function evalCommand(opts: EvalOptions): Promise<number> {
   }
 
   const sha = await resolveSha(gitRoot, ref);
-  const total = prompts.length * cfg.runs.samples;
+  let total = prompts.length * cfg.runs.samples;
   let runIdx = resume?.runs.length ?? 0;
+  const seenRunEnd = new Set<string>();
 
   let debug: DebugLogger = noopDebug();
   if (opts.debug) {
@@ -149,14 +150,23 @@ export async function evalCommand(opts: EvalOptions): Promise<number> {
         await saveSnapshot(partial, cfg.snapshots.dir);
       },
       onProgress: (ev) => {
-        if (ev.kind === 'run-start') {
+        // See cli/run.ts for the rationale: align the displayed denominator
+        // with what this invocation actually has to do.
+        if (ev.kind === 'matrix-built') {
+          total = ev.freshRows + ev.reJudgeRows;
+          runIdx = 0;
+        } else if (ev.kind === 'run-start') {
           step(runIdx + 1, total, ev.rowId, 'running claude…');
         } else if (ev.kind === 'judge-start') {
           step(runIdx + 1, total, ev.runId, 'judging…');
         } else if (ev.kind === 'run-end') {
+          seenRunEnd.add(ev.rowId);
           runIdx++;
           const status = ev.error ? 'FAIL' : 'OK';
           progress(runIdx, total, ev.rowId, status, ev.durationMs);
+        } else if (ev.kind === 'judge-end' && !seenRunEnd.has(ev.runId)) {
+          runIdx++;
+          progress(runIdx, total, ev.runId, 'OK', 0);
         }
       },
     });

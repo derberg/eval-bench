@@ -98,6 +98,7 @@ export interface RunBenchmarkOptions {
 }
 
 export type ProgressEvent =
+  | { kind: 'matrix-built'; freshRows: number; reJudgeRows: number }
   | { kind: 'run-start'; rowId: string }
   | { kind: 'run-end'; rowId: string; durationMs: number; error: string | null }
   | { kind: 'judge-start'; runId: string }
@@ -406,6 +407,11 @@ export async function runBenchmark(opts: RunBenchmarkOptions): Promise<Snapshot>
     freshRows: fresh.length,
     reJudgeRows: rejudge.length,
     parallel: opts.config.runs.parallel,
+  });
+  opts.onProgress?.({
+    kind: 'matrix-built',
+    freshRows: fresh.length,
+    reJudgeRows: rejudge.length,
   });
 
   // Serialize checkpoint writes so concurrent rows don't corrupt the file.

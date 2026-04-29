@@ -1,7 +1,7 @@
 import { loadSnapshot } from '../snapshot.js';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { Snapshot } from '../types.js';
+import type { Snapshot, Variant } from '../types.js';
 
 function escape(s: string): string {
   return s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c] ?? c);
@@ -10,47 +10,407 @@ function escape(s: string): string {
 function fmtUsage(r: { usage?: { inputTokens: number; outputTokens: number; totalCostUsd: number } | null }): string {
   if (!r.usage) return '';
   const u = r.usage;
-  return `<div class="tok">in ${u.inputTokens.toLocaleString('en-US')} · out ${u.outputTokens.toLocaleString('en-US')} · $${u.totalCostUsd.toFixed(4)}</div>`;
+  return `<div class="cell-tok">in ${u.inputTokens.toLocaleString('en-US')} · out ${u.outputTokens.toLocaleString('en-US')} · $${u.totalCostUsd.toFixed(4)}</div>`;
+}
+
+function scoreClass(score: number): string {
+  if (score === 0) return 'fail';
+  if (score >= 4.5) return 'great';
+  if (score >= 3.5) return 'ok';
+  if (score >= 2.5) return 'meh';
+  return 'bad';
+}
+
+function meanFor(s: Snapshot, promptId: string, variant: Variant): { mean: number; n: number; failed: number } {
+  const runs = s.runs.filter((r) => r.promptId === promptId && r.variant === variant);
+  const scores: number[] = [];
+  let failed = 0;
+  for (const r of runs) {
+    const j = s.judgments.find((x) => x.runId === r.id);
+    if (!j) continue;
+    if (j.score === 0 || j.error) failed++;
+    scores.push(j.score);
+  }
+  const mean = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
+  return { mean, n: scores.length, failed };
+}
+
+interface Verdict {
+  label: string;
+  klass: 'good' | 'bad' | 'mixed' | 'neutral' | 'partial';
+  hook: string;
+  reasons: string[];
+}
+
+function computeVerdict(s: Snapshot): Verdict {
+  const scoreDelta = s.summary.delta;
+  const costDelta = s.summary.tokens?.costDelta ?? 0;
+  const baseN = s.summary.baseline.n;
+  const curN = s.summary.current.n;
+  const failed = s.judgments.filter((j) => j.score === 0 || j.error).length;
+  const hasTokens = !!s.summary.tokens;
+
+  if (curN === 0)
+    return { label: 'baseline only', klass: 'partial', hook: 'No current variant runs to compare against.', reasons: [] };
+  if (baseN === 0)
+    return { label: 'current only', klass: 'partial', hook: 'No baseline variant runs to compare against.', reasons: [] };
+
+  const scoreRegressed = scoreDelta < -0.2;
+  const scoreImproved = scoreDelta > 0.2;
+  const costSaved = hasTokens && costDelta < -0.05;
+  const costGrew = hasTokens && costDelta > 0.05;
+
+  const reasons: string[] = [];
+  if (failed > 0) reasons.push(`${failed} run${failed > 1 ? 's' : ''} failed (score 0)`);
+  if (scoreRegressed) reasons.push(`quality dropped ${Math.abs(scoreDelta).toFixed(2)} pts`);
+  else if (scoreImproved) reasons.push(`quality rose ${scoreDelta.toFixed(2)} pts`);
+  else reasons.push(`quality held steady (Δ ${scoreDelta >= 0 ? '+' : ''}${scoreDelta.toFixed(2)})`);
+  if (costSaved) reasons.push(`cost fell $${Math.abs(costDelta).toFixed(2)}`);
+  else if (costGrew) reasons.push(`cost rose $${costDelta.toFixed(2)}`);
+
+  let label: string;
+  let klass: Verdict['klass'];
+  let hook: string;
+
+  if (scoreRegressed && costSaved) {
+    label = 'mixed';
+    klass = 'mixed';
+    hook = 'Cheaper, but worse. Trade-off you may not want.';
+  } else if (scoreImproved && costGrew) {
+    label = 'mixed';
+    klass = 'mixed';
+    hook = 'Better quality, but more expensive. Worth it?';
+  } else if (scoreRegressed) {
+    label = 'regression';
+    klass = 'bad';
+    hook = 'Current is worse than baseline. Investigate before shipping.';
+  } else if (scoreImproved) {
+    label = 'win';
+    klass = 'good';
+    hook = costSaved ? 'Better and cheaper. Ship it.' : 'Higher quality at similar cost.';
+  } else if (costSaved) {
+    label = 'cost win';
+    klass = 'good';
+    hook = 'Same quality, lower cost.';
+  } else if (costGrew) {
+    label = 'cost regression';
+    klass = 'bad';
+    hook = 'Same quality, but more expensive.';
+  } else {
+    label = 'stable';
+    klass = 'neutral';
+    hook = 'No meaningful change in quality or cost.';
+  }
+
+  return { label, klass, hook, reasons };
 }
 
 function renderHtml(s: Snapshot): string {
-  const rows = s.prompts.map((p) => {
+  const verdict = computeVerdict(s);
+  const t = s.summary.tokens;
+  const baselineMean = s.summary.baseline.mean;
+  const currentMean = s.summary.current.mean;
+  const scoreDelta = s.summary.delta;
+  const costDelta = t?.costDelta ?? 0;
+  const failedRuns = s.judgments.filter((j) => j.score === 0 || j.error).length;
+  const passedRuns = s.runs.length - failedRuns;
+
+  const promptRows = s.prompts.map((p, i) => {
+    const b = meanFor(s, p.id, 'baseline');
+    const c = meanFor(s, p.id, 'current');
+    const delta = c.n && b.n ? c.mean - b.mean : 0;
+    const dir = delta > 0.1 ? 'up' : delta < -0.1 ? 'down' : 'flat';
+    const noData = b.n === 0 || c.n === 0;
+    const baseW = (b.mean / 5) * 100;
+    const curW = (c.mean / 5) * 100;
+    const flag = b.failed + c.failed > 0;
+    return `<a class="prow" href="#p-${escape(p.id)}" style="--i:${i}">
+      <div class="prow-id">${escape(p.id)}</div>
+      <div class="prow-bars">
+        <div class="prow-bar prow-bar-base"><span style="width:${baseW.toFixed(1)}%"></span><em>${b.n ? b.mean.toFixed(2) : '—'}</em></div>
+        <div class="prow-bar prow-bar-curr"><span style="width:${curW.toFixed(1)}%"></span><em>${c.n ? c.mean.toFixed(2) : '—'}</em></div>
+      </div>
+      <div class="prow-delta prow-delta-${dir}">${noData ? '—' : (delta >= 0 ? '+' : '') + delta.toFixed(2)}</div>
+      ${flag ? '<div class="prow-flag" title="contains failed runs">!</div>' : '<div class="prow-flag-empty"></div>'}
+    </a>`;
+  });
+
+  const sections = s.prompts.map((p, pi) => {
     const variants = (['baseline', 'current'] as const).map((v) => {
       const runs = s.runs.filter((r) => r.promptId === p.id && r.variant === v);
       const cells = runs
         .map((r) => {
           const j = s.judgments.find((x) => x.runId === r.id);
-          return `<div class="cell"><div class="score">score ${j?.score ?? '-'}</div>${fmtUsage(r)}<pre>${escape(r.output).slice(0, 800)}</pre><div class="rat">${escape(j?.rationale ?? '')}</div></div>`;
+          const score = j?.score ?? 0;
+          const cls = scoreClass(score);
+          const failed = score === 0 || (j?.error != null);
+          const sliced = (r.output ?? '').slice(0, 800);
+          const body = sliced.trim()
+            ? `<pre>${escape(sliced)}</pre>`
+            : '<div class="empty-out">no output</div>';
+          const note = j?.rationale || j?.error || '';
+          return `<div class="cell cell-${cls}${failed ? ' cell-failed' : ''}">
+            <div class="cell-head">
+              <div class="cell-score">score ${j?.score ?? '-'}</div>
+              ${fmtUsage(r)}
+            </div>
+            ${body}
+            ${note ? `<div class="rat">${escape(note)}</div>` : ''}
+          </div>`;
         })
         .join('');
-      return `<div class="variant"><h4>${v}</h4>${cells}</div>`;
+      return `<div class="variant variant-${v}">
+        <div class="variant-head"><span class="variant-label">${v}</span></div>
+        ${cells || '<div class="variant-empty">no runs</div>'}
+      </div>`;
     });
-    return `<section><h3>${escape(p.id)}</h3><p class="prompt">${escape(p.prompt)}</p>${variants.join('')}</section>`;
+    return `<section id="p-${escape(p.id)}" style="--i:${pi}">
+      <header class="sect-head">
+        <span class="sect-tag">prompt ${pi + 1} / ${s.prompts.length}</span>
+        <h3>${escape(p.id)}</h3>
+      </header>
+      <div class="prompt"><pre>${escape(p.prompt).trim()}</pre></div>
+      <div class="variants">${variants.join('')}</div>
+    </section>`;
   });
-  const t = s.summary.tokens;
-  const tokenLine = t
-    ? `<p>tokens — baseline in/out ${t.baseline.inputTokens.toLocaleString('en-US')}/${t.baseline.outputTokens.toLocaleString('en-US')} ($${t.baseline.totalCostUsd.toFixed(4)}) · current in/out ${t.current.inputTokens.toLocaleString('en-US')}/${t.current.outputTokens.toLocaleString('en-US')} ($${t.current.totalCostUsd.toFixed(4)}) · cost Δ ${t.costDelta >= 0 ? '+' : ''}$${t.costDelta.toFixed(4)}</p>`
-    : '';
-  return `<!doctype html><html><head><meta charset="utf-8"><title>${escape(s.name)}</title>
+
+  const scoreDeltaCls = scoreDelta > 0.2 ? 'good' : scoreDelta < -0.2 ? 'bad' : 'neutral';
+  const costDeltaCls = costDelta < -0.05 ? 'good' : costDelta > 0.05 ? 'bad' : 'neutral';
+  const samples = s.config?.runs?.samples ?? '?';
+
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<title>${escape(s.name)} · evalforge</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
 <style>
-body{font:14px -apple-system,sans-serif;margin:2em;color:#111}
-section{border-top:1px solid #eee;padding-top:1em;margin-top:2em}
-.variant{display:inline-block;vertical-align:top;width:48%;margin-right:1%}
-.cell{background:#f7f7f7;padding:0.5em;margin:0.5em 0;border-radius:4px}
-.score{font-weight:bold;color:#0a0}
-.tok{color:#888;font-size:11px;margin:0.2em 0}
-pre{white-space:pre-wrap;font-size:12px}
-.rat{color:#666;font-size:12px;margin-top:0.3em}
-.prompt{background:#eef;padding:0.5em;border-radius:4px}
-h1{margin-bottom:0}
-.meta{color:#666;font-size:12px}
+:root{
+  --bg:#0b0a0d;
+  --bg-elev:#121116;
+  --bg-cell:#16151a;
+  --line:#2a262e;
+  --line-soft:#1d1b22;
+  --fg:#ece8de;
+  --fg-soft:#a09a8c;
+  --mute:#5a5560;
+  --good:#7afca7;
+  --bad:#ff6f6f;
+  --warn:#f6c177;
+  --accent:#e0c89c;
+  --grid:rgba(255,255,255,0.018);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--fg);font-family:'JetBrains Mono',ui-monospace,monospace;font-weight:400;font-size:13px;line-height:1.55;-webkit-font-smoothing:antialiased}
+body{
+  background-image:
+    radial-gradient(circle at 18% -10%, rgba(122,252,167,0.05), transparent 45%),
+    radial-gradient(circle at 110% 8%, rgba(255,111,111,0.05), transparent 50%),
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: auto, auto, 32px 32px, 32px 32px;
+  background-attachment: fixed;
+  min-height:100vh;padding-bottom:6em;
+}
+
+/* === TOPBAR === */
+.topbar{
+  display:flex;align-items:center;justify-content:space-between;gap:2em;
+  padding:1.1em 2.4em;border-bottom:1px solid var(--line-soft);
+  background:linear-gradient(to bottom,rgba(0,0,0,0.35),transparent);
+}
+.brand{display:flex;align-items:center;gap:0.7em;font-size:11px;letter-spacing:0.2em;text-transform:uppercase;color:var(--fg-soft)}
+.brand-dot{width:8px;height:8px;border-radius:50%;background:var(--good);box-shadow:0 0 12px var(--good);animation:pulse 2.4s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:0.4}50%{opacity:1}}
+.brand strong{color:var(--fg);font-weight:500;letter-spacing:0.18em}
+.topbar-meta{font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:var(--mute);text-align:right;line-height:1.7}
+.topbar-meta b{color:var(--fg-soft);font-weight:400;text-transform:none;letter-spacing:0.02em}
+
+/* === HERO === */
+.hero{padding:4em 2.4em 2.6em;border-bottom:1px solid var(--line-soft);position:relative}
+.hero-eyebrow{font-size:10px;letter-spacing:0.32em;text-transform:uppercase;color:var(--mute);margin-bottom:1.4em;display:flex;align-items:center;gap:0.8em}
+.hero-eyebrow::after{content:'';flex:1;height:1px;background:var(--line)}
+.hero h1{
+  font-family:'Instrument Serif',serif;
+  font-weight:400;font-style:italic;
+  font-size:clamp(56px, 11vw, 144px);
+  line-height:0.9;letter-spacing:-0.02em;
+  margin:0;color:var(--fg);
+}
+.hero h1 .name{
+  display:block;margin-top:0.55em;
+  color:var(--accent);font-style:normal;
+  font-family:'JetBrains Mono',monospace;
+  font-size:0.18em;letter-spacing:0.02em;font-weight:400;
+}
+.hero[data-verdict="good"] h1{color:var(--good)}
+.hero[data-verdict="bad"] h1{color:var(--bad)}
+.hero[data-verdict="mixed"] h1{color:var(--warn)}
+.hero[data-verdict="neutral"] h1{color:var(--accent)}
+.hero[data-verdict="partial"] h1{color:var(--accent)}
+
+.hero-hook{font-size:18px;color:var(--fg-soft);max-width:54ch;margin:1.6em 0 0;line-height:1.45}
+
+.reasons{margin-top:1.8em;display:flex;flex-wrap:wrap;gap:0.5em}
+.reason{font-size:10.5px;letter-spacing:0.1em;text-transform:uppercase;padding:0.45em 0.85em;border:1px solid var(--line);color:var(--fg-soft);background:var(--bg-elev)}
+.reason::before{content:'›';margin-right:0.55em;color:var(--mute)}
+
+/* === METRICS === */
+.metrics{display:grid;grid-template-columns:repeat(3,1fr);border-bottom:1px solid var(--line-soft)}
+.metric{padding:2em 2.4em;border-right:1px solid var(--line-soft);position:relative;overflow:hidden}
+.metric:last-child{border-right:none}
+.metric-label{font-size:10px;letter-spacing:0.28em;text-transform:uppercase;color:var(--mute);margin-bottom:1em;display:flex;align-items:baseline;gap:0.7em}
+.metric-label-tag{font-size:9px;letter-spacing:0.12em;color:var(--mute);padding:0.15em 0.5em;border:1px solid var(--line)}
+.metric-value{font-size:54px;font-weight:300;line-height:1;letter-spacing:-0.04em;color:var(--fg);font-variant-numeric:tabular-nums}
+.metric-value-sub{font-size:24px;color:var(--mute);font-weight:300;letter-spacing:-0.02em}
+.metric-detail{margin-top:0.6em;font-size:11px;color:var(--fg-soft);letter-spacing:0.04em}
+.metric-detail b{color:var(--fg);font-weight:400}
+.metric-delta{font-size:13px;font-weight:500;font-variant-numeric:tabular-nums;margin-top:0.5em;letter-spacing:0.01em}
+.metric-delta.good{color:var(--good)}
+.metric-delta.bad{color:var(--bad)}
+.metric-delta.neutral{color:var(--fg-soft)}
+.metric-delta::before{content:attr(data-icon);margin-right:0.35em;display:inline-block;width:0.9em;text-align:center}
+.metric-bar{margin-top:1.2em;height:3px;background:var(--line);position:relative;overflow:hidden}
+.metric-bar span{position:absolute;top:0;bottom:0;left:0;background:var(--accent);transform-origin:left;transform:scaleX(0);animation:bar-grow 1.4s cubic-bezier(0.2,0.8,0.2,1) 0.3s forwards}
+@keyframes bar-grow{to{transform:scaleX(1)}}
+
+/* === SECTION TITLE === */
+.section-title{font-size:11px;letter-spacing:0.32em;text-transform:uppercase;color:var(--mute);margin:3.5em 2.4em 1.4em;display:flex;align-items:center;gap:1em}
+.section-title::before{content:'';width:24px;height:1px;background:var(--accent)}
+.section-title::after{content:'';flex:1;height:1px;background:var(--line)}
+
+/* === PROMPTS TABLE === */
+.prompts-table{margin:0 2.4em}
+.prow{
+  display:grid;grid-template-columns:minmax(180px,2fr) 5fr 90px 30px;
+  align-items:center;gap:1.4em;
+  padding:0.95em 1.2em;
+  border:1px solid var(--line-soft);border-bottom:none;
+  text-decoration:none;color:inherit;
+  background:var(--bg-elev);
+  transition:background 0.18s, border-color 0.18s, transform 0.18s;
+  opacity:0;animation:fade-in 0.5s ease-out forwards;
+  animation-delay:calc(var(--i) * 60ms + 200ms);
+}
+.prow:hover{background:#1c1a20;border-color:var(--line)}
+.prow:last-child{border-bottom:1px solid var(--line-soft)}
+.prow-id{font-size:13px;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.prow-bars{display:flex;flex-direction:column;gap:0.3em}
+.prow-bar{position:relative;height:14px;background:var(--line-soft);display:flex;align-items:center}
+.prow-bar span{position:absolute;top:0;bottom:0;left:0;transform-origin:left;transform:scaleX(0);animation:bar-grow 1s cubic-bezier(0.2,0.8,0.2,1) forwards;animation-delay:calc(var(--i) * 60ms + 400ms)}
+.prow-bar-base span{background:var(--fg-soft)}
+.prow-bar-curr span{background:var(--accent)}
+.prow-bar em{position:absolute;right:0.6em;font-style:normal;font-size:10px;color:var(--fg);font-variant-numeric:tabular-nums;font-weight:500;mix-blend-mode:difference;z-index:1}
+.prow-bar::after{position:absolute;left:0.55em;font-size:9px;letter-spacing:0.18em;color:var(--bg);font-weight:600;z-index:1}
+.prow-bar-base::after{content:'B'}
+.prow-bar-curr::after{content:'C'}
+.prow-delta{text-align:right;font-variant-numeric:tabular-nums;font-size:14px;font-weight:500;letter-spacing:-0.01em}
+.prow-delta-up{color:var(--good)}
+.prow-delta-down{color:var(--bad)}
+.prow-delta-flat{color:var(--fg-soft)}
+.prow-delta-up::before{content:'▲ '}
+.prow-delta-down::before{content:'▼ '}
+.prow-delta-flat::before{content:'• '}
+.prow-flag{width:22px;height:22px;display:flex;align-items:center;justify-content:center;border-radius:50%;background:rgba(255,111,111,0.16);color:var(--bad);font-weight:700;font-size:13px}
+.prow-flag-empty{width:22px;height:22px}
+@keyframes fade-in{to{opacity:1}}
+
+/* === DETAIL SECTIONS === */
+section{padding:2.2em 2.4em;margin-top:1.2em;border-top:1px solid var(--line-soft);scroll-margin-top:1em;opacity:0;animation:fade-in 0.5s ease-out forwards;animation-delay:calc(var(--i) * 100ms + 600ms)}
+.sect-head{display:flex;align-items:baseline;gap:1.2em;margin-bottom:1.2em;flex-wrap:wrap}
+.sect-tag{font-size:10px;letter-spacing:0.24em;text-transform:uppercase;color:var(--mute);padding:0.3em 0.7em;border:1px solid var(--line)}
+section h3{font-family:'Instrument Serif',serif;font-style:italic;font-weight:400;font-size:36px;margin:0;color:var(--fg);letter-spacing:-0.01em;line-height:1}
+.prompt{background:linear-gradient(to right, rgba(224,200,156,0.05), transparent);border-left:2px solid var(--accent);padding:1em 1.4em;margin:0 0 1.4em;font-size:12px;color:var(--fg-soft)}
+.prompt pre{margin:0;white-space:pre-wrap;font-family:'JetBrains Mono',monospace;line-height:1.6}
+
+.variants{display:grid;grid-template-columns:1fr 1fr;gap:1em}
+.variant-head{font-size:10px;letter-spacing:0.28em;text-transform:uppercase;color:var(--mute);margin-bottom:0.6em;display:flex;align-items:center;gap:0.8em}
+.variant-head::after{content:'';flex:1;height:1px;background:var(--line-soft)}
+.variant-label{padding:0.28em 0.75em;border:1px solid var(--line);background:var(--bg-elev)}
+.variant-baseline .variant-label{color:var(--fg-soft)}
+.variant-current .variant-label{color:var(--accent);border-color:var(--accent);background:rgba(224,200,156,0.06)}
+
+.cell{background:var(--bg-cell);border:1px solid var(--line-soft);margin-bottom:0.7em;padding:0.95em 1.05em;position:relative;border-left:3px solid var(--mute)}
+.cell-great{border-left-color:var(--good)}
+.cell-ok{border-left-color:var(--accent)}
+.cell-meh{border-left-color:var(--warn)}
+.cell-bad{border-left-color:var(--bad)}
+.cell-fail{border-left-color:var(--bad);background:rgba(255,111,111,0.04)}
+.cell-failed::after{content:'FAILED';position:absolute;top:0.6em;right:0.85em;font-size:9px;letter-spacing:0.22em;color:var(--bad);font-weight:700}
+.cell-head{display:flex;align-items:baseline;justify-content:space-between;gap:1em;margin-bottom:0.7em}
+.cell-score{font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:var(--fg);font-weight:500}
+.cell-great .cell-score{color:var(--good)}
+.cell-ok .cell-score{color:var(--accent)}
+.cell-meh .cell-score{color:var(--warn)}
+.cell-bad .cell-score,.cell-fail .cell-score{color:var(--bad)}
+.cell-tok{font-size:10px;color:var(--mute);letter-spacing:0.04em;font-variant-numeric:tabular-nums}
+.cell pre{white-space:pre-wrap;font-size:12px;margin:0;color:var(--fg);line-height:1.55}
+.empty-out{font-family:'Instrument Serif',serif;font-style:italic;color:var(--bad);font-size:16px;padding:0.4em 0}
+.rat{margin-top:0.8em;padding-top:0.7em;border-top:1px dashed var(--line);font-size:11px;color:var(--fg-soft);line-height:1.55}
+.rat::before{content:'JUDGE';display:inline-block;font-size:9px;letter-spacing:0.2em;color:var(--mute);margin-right:0.6em;padding:0.1em 0.4em;border:1px solid var(--line)}
+.variant-empty{padding:2em;color:var(--mute);text-align:center;font-size:11px;letter-spacing:0.16em;text-transform:uppercase;border:1px dashed var(--line)}
+
+@media (max-width:900px){
+  .metrics{grid-template-columns:1fr}
+  .metric{border-right:none;border-bottom:1px solid var(--line-soft)}
+  .variants{grid-template-columns:1fr}
+  .prow{grid-template-columns:1fr;gap:0.5em}
+  .prow-id{font-size:14px}
+  .topbar,.hero,.metric,section{padding-left:1.4em;padding-right:1.4em}
+  .section-title,.prompts-table{margin-left:1.4em;margin-right:1.4em}
+  .topbar{flex-direction:column;align-items:flex-start;gap:0.6em}
+  .topbar-meta{text-align:left}
+}
 </style></head>
 <body>
-<h1>${escape(s.name)}</h1>
-<div class="meta">created ${s.createdAt} · judge ${s.judge.provider}/${s.judge.model} · baseline ${escape(s.plugin.baselineRef)} · current ${escape(s.plugin.currentRef)}</div>
-<p>baseline mean ${s.summary.baseline.mean.toFixed(2)} · current mean ${s.summary.current.mean.toFixed(2)} · delta ${s.summary.delta.toFixed(2)}</p>
-${tokenLine}
-${rows.join('')}
+<div class="topbar">
+  <div class="brand">
+    <span class="brand-dot"></span>
+    <span><strong>evalforge</strong> // snapshot view</span>
+  </div>
+  <div class="topbar-meta">
+    <div>${escape(s.createdAt)}</div>
+    <div>judge <b>${escape(s.judge.provider)}/${escape(s.judge.model)}</b> · base <b>${escape(s.plugin.baselineRef)}</b> → curr <b>${escape(s.plugin.currentRef)}</b></div>
+  </div>
+</div>
+
+<div class="hero" data-verdict="${verdict.klass}">
+  <div class="hero-eyebrow">verdict</div>
+  <h1>${escape(verdict.label)}<span class="name">${escape(s.name)}</span></h1>
+  <p class="hero-hook">${escape(verdict.hook)}</p>
+  ${verdict.reasons.length ? `<div class="reasons">${verdict.reasons.map((r) => `<span class="reason">${escape(r)}</span>`).join('')}</div>` : ''}
+</div>
+
+<div class="metrics">
+  <div class="metric">
+    <div class="metric-label">quality score <span class="metric-label-tag">mean / 5</span></div>
+    <div class="metric-value">${currentMean.toFixed(2)}</div>
+    <div class="metric-detail">baseline <b>${baselineMean.toFixed(2)}</b> · n=${s.summary.current.n || s.summary.baseline.n}</div>
+    <div class="metric-delta ${scoreDeltaCls}" data-icon="${scoreDelta > 0.2 ? '▲' : scoreDelta < -0.2 ? '▼' : '•'}">${scoreDelta >= 0 ? '+' : ''}${scoreDelta.toFixed(2)} vs baseline</div>
+    <div class="metric-bar"><span style="width:${Math.min(100, Math.max(0, (currentMean / 5) * 100)).toFixed(1)}%"></span></div>
+  </div>
+  <div class="metric">
+    <div class="metric-label">cost <span class="metric-label-tag">usd</span></div>
+    <div class="metric-value">${t ? '$' + t.current.totalCostUsd.toFixed(2) : '—'}</div>
+    <div class="metric-detail">${t ? `baseline <b>$${t.baseline.totalCostUsd.toFixed(2)}</b>` : 'no token data'}</div>
+    ${t ? `<div class="metric-delta ${costDeltaCls}" data-icon="${costDelta < -0.05 ? '▼' : costDelta > 0.05 ? '▲' : '•'}">${costDelta >= 0 ? '+' : ''}$${costDelta.toFixed(2)} vs baseline</div>` : '<div class="metric-delta neutral" data-icon="•">—</div>'}
+    <div class="metric-bar"><span style="width:${t ? Math.min(100, (t.current.totalCostUsd / (Math.max(t.current.totalCostUsd, t.baseline.totalCostUsd) || 1)) * 100).toFixed(1) : 0}%"></span></div>
+  </div>
+  <div class="metric">
+    <div class="metric-label">runs <span class="metric-label-tag">${s.runs.length} total</span></div>
+    <div class="metric-value">${passedRuns}<span class="metric-value-sub">/${s.runs.length}</span></div>
+    <div class="metric-detail">prompts <b>${s.prompts.length}</b> · samples per variant <b>${samples}</b></div>
+    <div class="metric-delta ${failedRuns > 0 ? 'bad' : 'good'}" data-icon="${failedRuns > 0 ? '!' : '✓'}">${failedRuns > 0 ? `${failedRuns} failed` : 'all green'}</div>
+    <div class="metric-bar"><span style="width:${s.runs.length ? ((passedRuns / s.runs.length) * 100).toFixed(1) : 0}%;background:${failedRuns > 0 ? 'var(--bad)' : 'var(--good)'}"></span></div>
+  </div>
+</div>
+
+<div class="section-title">per-prompt breakdown</div>
+<div class="prompts-table">${promptRows.join('')}</div>
+
+<div class="section-title">run details</div>
+${sections.join('')}
+
 </body></html>`;
 }
 

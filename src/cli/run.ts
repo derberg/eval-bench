@@ -234,8 +234,9 @@ export async function runCommand(opts: RunOptions): Promise<number> {
   }
 
   try {
-    const total = prompts.length * cfg.runs.samples * 2;
+    let total = prompts.length * cfg.runs.samples * 2;
     let runIdx = resume?.runs.length ?? 0;
+    const seenRunEnd = new Set<string>();
     const snap = await runBenchmark({
       config: cfg,
       prompts,
@@ -252,14 +253,26 @@ export async function runCommand(opts: RunOptions): Promise<number> {
         await saveSnapshot(partial, cfg.snapshots.dir);
       },
       onProgress: (ev) => {
-        if (ev.kind === 'run-start') {
+        // Reframe the progress denominator around the work this invocation
+        // actually has to do (fresh runs + judge retries), so resumes don't
+        // print misleading [N+1/N] lines.
+        if (ev.kind === 'matrix-built') {
+          total = ev.freshRows + ev.reJudgeRows;
+          runIdx = 0;
+        } else if (ev.kind === 'run-start') {
           step(runIdx + 1, total, ev.rowId, 'running claude…');
         } else if (ev.kind === 'judge-start') {
           step(runIdx + 1, total, ev.runId, 'judging…');
         } else if (ev.kind === 'run-end') {
+          seenRunEnd.add(ev.rowId);
           runIdx++;
           const status = ev.error ? 'FAIL' : 'OK';
           progress(runIdx, total, ev.rowId, status, ev.durationMs);
+        } else if (ev.kind === 'judge-end' && !seenRunEnd.has(ev.runId)) {
+          // Re-judge-only row: no run-end fired for it, so judge-end is the
+          // terminal signal that advances the counter.
+          runIdx++;
+          progress(runIdx, total, ev.runId, 'OK', 0);
         }
       },
     });

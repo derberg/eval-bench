@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.8.0 — 2026-04-29
+
+**Features:**
+
+- **Redesigned `eb view` HTML.** The snapshot view used to be a wall of identical-looking grey cells with a one-line summary that buried the actual finding ("baseline mean 4.90 · current mean 4.60 · delta -0.30"). Now leads with a verdict — `regression`, `win`, `mixed`, `cost win`, `cost regression`, `stable`, etc. — set in giant Instrument Serif italic, color-coded (green/red/amber), with a one-sentence hook that names the trade-off ("Cheaper, but worse. Trade-off you may not want.") and chip-style reasons that spell out exactly what moved (`▸ 1 run failed`, `▸ quality dropped 0.30 pts`, `▸ cost fell $5.46`). Below: three metric tiles (quality / cost / runs) with deltas vs baseline; a per-prompt breakdown with stacked baseline-vs-current bars, signed delta, and a red `!` flag on prompts that contain a failed run; run cells now have a color-graded left border by score (green ≥ 4.5, amber, red, dark-red for 0/empty), a `FAILED` corner badge on score-0 rows, and italic "no output" instead of a blank `<pre>` for empty outputs. Dark theme with a faint dot grid and JetBrains Mono / Instrument Serif typography. Same data, drastically more legible.
+- **Progress denominator now matches the work this invocation actually does.** `eb run` and `eb eval` previously printed `[N/total]` against the *full* matrix, so a `--retry-failed` resume of 4 rows against a 60-row snapshot would print `[57/60]` then `[58/60]` instead of `[1/4]` … `[4/4]`. The runner now emits a `matrix-built` event with `{freshRows, reJudgeRows}` and the CLIs reframe their denominator off it. Re-judge-only rows (resumed snapshots where the run output is cached but the judgment failed) advance the counter on `judge-end` since no `run-end` fires for them.
+
+**Schema:**
+
+- `ProgressEvent` adds `{ kind: 'matrix-built'; freshRows: number; reJudgeRows: number }`. Existing consumers that switch on `kind` ignore unknown kinds and are unaffected.
+
 ## 0.7.1 — 2026-04-29
 
 **Fixes:**
