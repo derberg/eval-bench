@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.7.0 — 2026-04-29
+
+**Features:**
+
+- **`--debug` flag on `eb run` and `eb eval`.** Writes `debug-<ISO-timestamp>.log` under the snapshot dir (one file per invocation, never overwrites) and mirrors a colorized version to stderr. Logs every pipeline event (`config-loaded`, `prompts-loaded`, `matrix-built`, `run-start`/`run-end`, `judge-start`/`judge-end`, `checkpoint`, `snapshot-saved`), every HTTP exchange to the judge with full request/response bodies, and the subprocess command line for each Claude invocation. Sensitive headers (`Authorization`, `X-Api-Key`, `Anthropic-Api-Key`, `Openai-Api-Key`) are redacted. Stderr truncates bodies > 2KB; the file always has full bodies.
+- **Ollama judge now streams (`/api/chat` with `stream: true`).** Each NDJSON chunk resets undici's `bodyTimeout`, so legitimately slow generation no longer hits the hard 5-minute headers timeout. The final chunk's diagnostic timing fields (`prompt_eval_count/duration`, `eval_count/duration`, `total_duration`) are surfaced on `judge-end` debug events, so a fast snapshot's debug log can be `diff`ed against a slow snapshot's to localize "is the prompt bigger or is generation slower per token". Heartbeat `http-chunk` events fire every 32 chunks during streaming.
+
 ## 0.6.0 — 2026-04-29
 
 **Features:**

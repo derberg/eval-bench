@@ -7,6 +7,8 @@ import { judgeWithOpenAICompatible } from './openai-compatible.js';
 import { judgeWithOpenRouter } from './openrouter.js';
 import { judgeWithGithubModels } from './github-models.js';
 import { judgeWithClaudeCli } from './claude-cli.js';
+import type { DebugLogger, OllamaStreamSummary } from '../debug.js';
+import { noopDebug } from '../debug.js';
 
 export interface JudgeInput {
   prompt: string;
@@ -23,6 +25,10 @@ export interface JudgeConfig {
   maxTokens: number;
 }
 
+export type JudgeResult = Omit<Judgment, 'runId'> & {
+  ollamaTimings: OllamaStreamSummary | null;
+};
+
 const DEFAULT_API_KEY_ENV: Record<JudgeProvider, string | null> = {
   ollama: null,
   anthropic: 'ANTHROPIC_API_KEY',
@@ -36,20 +42,27 @@ const DEFAULT_API_KEY_ENV: Record<JudgeProvider, string | null> = {
 export async function judge(
   cfg: JudgeConfig,
   input: JudgeInput,
-): Promise<Omit<Judgment, 'runId'>> {
+  debug: DebugLogger = noopDebug(),
+): Promise<JudgeResult> {
   const apiKeyEnv = cfg.apiKeyEnv ?? DEFAULT_API_KEY_ENV[cfg.provider];
   const apiKey = apiKeyEnv ? (process.env[apiKeyEnv] ?? null) : null;
   let res: { score: number; rationale: string; raw: string };
+  let timings: OllamaStreamSummary | null = null;
   switch (cfg.provider) {
     case 'ollama':
       if (!cfg.endpoint) throw new Error('ollama: endpoint required');
-      res = await judgeWithOllama({
-        endpoint: cfg.endpoint,
-        model: cfg.model,
-        temperature: cfg.temperature,
-        maxTokens: cfg.maxTokens,
-        ...input,
-      });
+      {
+        const r = await judgeWithOllama({
+          endpoint: cfg.endpoint,
+          model: cfg.model,
+          temperature: cfg.temperature,
+          maxTokens: cfg.maxTokens,
+          debug,
+          ...input,
+        });
+        res = r;
+        timings = r.timings;
+      }
       break;
     case 'anthropic':
       if (!apiKey) throw new Error(`anthropic: API key not set (env ${apiKeyEnv})`);
@@ -59,6 +72,7 @@ export async function judge(
         model: cfg.model,
         temperature: cfg.temperature,
         maxTokens: cfg.maxTokens,
+        debug,
         ...input,
       });
       break;
@@ -70,6 +84,7 @@ export async function judge(
         model: cfg.model,
         temperature: cfg.temperature,
         maxTokens: cfg.maxTokens,
+        debug,
         ...input,
       });
       break;
@@ -81,6 +96,7 @@ export async function judge(
         model: cfg.model,
         temperature: cfg.temperature,
         maxTokens: cfg.maxTokens,
+        debug,
         ...input,
       });
       break;
@@ -92,6 +108,7 @@ export async function judge(
         model: cfg.model,
         temperature: cfg.temperature,
         maxTokens: cfg.maxTokens,
+        debug,
         ...input,
       });
       break;
@@ -103,6 +120,7 @@ export async function judge(
         model: cfg.model,
         temperature: cfg.temperature,
         maxTokens: cfg.maxTokens,
+        debug,
         ...input,
       });
       break;
@@ -121,6 +139,7 @@ export async function judge(
     judgeModel: cfg.model,
     raw: res.raw,
     error: null,
+    ollamaTimings: timings,
   };
 }
 

@@ -4,6 +4,7 @@ import { runBenchmark } from '../run.js';
 import { saveSnapshot, loadSnapshot, pruneFailedRuns } from '../snapshot.js';
 import { resolveSha } from '../swap.js';
 import { info, ok, warn, err, progress, step } from '../logger.js';
+import { initDebug, noopDebug, type DebugLogger } from '../debug.js';
 import type { Config, Snapshot } from '../types.js';
 
 export interface EvalOptions {
@@ -18,6 +19,7 @@ export interface EvalOptions {
   retryFailed?: boolean;
   only?: string[];
   dryRun?: boolean;
+  debug?: boolean;
 }
 
 function applyOverrides(cfg: Config, opts: EvalOptions): Config {
@@ -95,42 +97,87 @@ export async function evalCommand(opts: EvalOptions): Promise<number> {
   const sha = await resolveSha(gitRoot, ref);
   const total = prompts.length * cfg.runs.samples;
   let runIdx = resume?.runs.length ?? 0;
-  const snap = await runBenchmark({
-    config: cfg,
-    prompts,
-    baselinePluginDir: '',
-    currentPluginDir: gitRoot,
-    baselineRef: '',
-    baselineSha: '',
-    currentRef: ref,
-    currentSha: sha,
-    name,
-    variants: ['current'],
-    resume,
-    onCheckpoint: async (partial) => {
-      await saveSnapshot(partial, cfg.snapshots.dir);
-    },
-    onProgress: (ev) => {
-      if (ev.kind === 'run-start') {
-        step(runIdx + 1, total, ev.rowId, 'running claude…');
-      } else if (ev.kind === 'judge-start') {
-        step(runIdx + 1, total, ev.runId, 'judging…');
-      } else if (ev.kind === 'run-end') {
-        runIdx++;
-        const status = ev.error ? 'FAIL' : 'OK';
-        progress(runIdx, total, ev.rowId, status, ev.durationMs);
+
+  let debug: DebugLogger = noopDebug();
+  if (opts.debug) {
+    try {
+      debug = await initDebug({ snapshotDir: cfg.snapshots.dir, name });
+      info(`Debug log: ${debug.logFile}`);
+      debug.event('config-loaded', {
+        configPath,
+        promptsPath,
+        judgeProvider: cfg.judge.provider,
+        judgeModel: cfg.judge.model,
+        judgeMaxTokens: cfg.judge.maxTokens,
+        judgeTemperature: cfg.judge.temperature,
+        runsParallel: cfg.runs.parallel,
+        runsSamples: cfg.runs.samples,
+      });
+      debug.event('prompts-loaded', {
+        path: promptsPath,
+        count: prompts.length,
+        ids: prompts.map((p) => p.id),
+      });
+      if (resume) {
+        debug.event('resume-loaded', {
+          name,
+          runsKept: resume.runs.length,
+          judgmentsKept: resume.judgments.length,
+        });
       }
-    },
-  });
-  const path = await saveSnapshot(snap, cfg.snapshots.dir);
-  ok(`Snapshot saved: ${path}`);
-  info(`  mean ${snap.summary.current.mean.toFixed(2)} (n=${snap.summary.current.n})`);
-  if (snap.summary.tokens) {
-    const t = snap.summary.tokens.current;
-    const fmtTok = (n: number): string => n.toLocaleString('en-US');
-    info(
-      `  tokens in/out ${fmtTok(t.inputTokens)}/${fmtTok(t.outputTokens)} cache_read ${fmtTok(t.cacheReadInputTokens)} cache_create ${fmtTok(t.cacheCreationInputTokens)} cost $${t.totalCostUsd.toFixed(4)} (n=${t.reportedRuns})`,
-    );
+    } catch (e) {
+      warn(`Could not initialize debug log: ${(e as Error).message}`);
+      debug = noopDebug();
+    }
   }
-  return 0;
+
+  try {
+    const snap = await runBenchmark({
+      config: cfg,
+      prompts,
+      baselinePluginDir: '',
+      currentPluginDir: gitRoot,
+      baselineRef: '',
+      baselineSha: '',
+      currentRef: ref,
+      currentSha: sha,
+      name,
+      variants: ['current'],
+      resume,
+      debug,
+      onCheckpoint: async (partial) => {
+        await saveSnapshot(partial, cfg.snapshots.dir);
+      },
+      onProgress: (ev) => {
+        if (ev.kind === 'run-start') {
+          step(runIdx + 1, total, ev.rowId, 'running claude…');
+        } else if (ev.kind === 'judge-start') {
+          step(runIdx + 1, total, ev.runId, 'judging…');
+        } else if (ev.kind === 'run-end') {
+          runIdx++;
+          const status = ev.error ? 'FAIL' : 'OK';
+          progress(runIdx, total, ev.rowId, status, ev.durationMs);
+        }
+      },
+    });
+    const path = await saveSnapshot(snap, cfg.snapshots.dir);
+    debug.event('snapshot-saved', {
+      path,
+      runs: snap.runs.length,
+      judgments: snap.judgments.length,
+      complete: true,
+    });
+    ok(`Snapshot saved: ${path}`);
+    info(`  mean ${snap.summary.current.mean.toFixed(2)} (n=${snap.summary.current.n})`);
+    if (snap.summary.tokens) {
+      const t = snap.summary.tokens.current;
+      const fmtTok = (n: number): string => n.toLocaleString('en-US');
+      info(
+        `  tokens in/out ${fmtTok(t.inputTokens)}/${fmtTok(t.outputTokens)} cache_read ${fmtTok(t.cacheReadInputTokens)} cache_create ${fmtTok(t.cacheCreationInputTokens)} cost $${t.totalCostUsd.toFixed(4)} (n=${t.reportedRuns})`,
+      );
+    }
+    return 0;
+  } finally {
+    await debug.close();
+  }
 }

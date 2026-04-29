@@ -79,6 +79,11 @@ eb run --baseline-from v1-baseline --save-as wip --only find-user-by-email
 # a few rows failed yesterday (judge timeout, quota)? re-run only those
 eb run --baseline main --save-as baseline --retry-failed
 
+# diagnose a slow / stuck judge — writes a per-invocation debug log under
+# .eval-bench/snapshots/<name>/debug-<ts>.log with full HTTP bodies and
+# Ollama timing fields, plus a colorized stderr mirror
+eb run --baseline main --save-as baseline --debug
+
 # side-by-side outputs in the browser
 eb view wip
 ```

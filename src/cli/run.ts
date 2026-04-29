@@ -5,6 +5,7 @@ import { saveSnapshot, loadSnapshot, pruneFailedRuns } from '../snapshot.js';
 import { createWorktree, resolveSha } from '../swap.js';
 import { compareSnapshots, formatComparisonMarkdown } from '../compare.js';
 import { info, ok, warn, err, progress, step } from '../logger.js';
+import { initDebug, noopDebug, type DebugLogger } from '../debug.js';
 import type { Config, Snapshot, RunResult, Judgment } from '../types.js';
 
 export interface RunOptions {
@@ -24,6 +25,7 @@ export interface RunOptions {
   force?: boolean;
   retryFailed?: boolean;
   dryRun?: boolean;
+  debug?: boolean;
   verbose?: boolean;
 }
 
@@ -198,6 +200,39 @@ export async function runCommand(opts: RunOptions): Promise<number> {
 
   const baselineWt = cachedBaseline ? null : await createWorktree(gitRoot, baselineRef);
 
+  let debug: DebugLogger = noopDebug();
+  if (opts.debug) {
+    try {
+      debug = await initDebug({ snapshotDir: cfg.snapshots.dir, name });
+      info(`Debug log: ${debug.logFile}`);
+      debug.event('config-loaded', {
+        configPath,
+        promptsPath,
+        judgeProvider: cfg.judge.provider,
+        judgeModel: cfg.judge.model,
+        judgeMaxTokens: cfg.judge.maxTokens,
+        judgeTemperature: cfg.judge.temperature,
+        runsParallel: cfg.runs.parallel,
+        runsSamples: cfg.runs.samples,
+      });
+      debug.event('prompts-loaded', {
+        path: promptsPath,
+        count: prompts.length,
+        ids: prompts.map((p) => p.id),
+      });
+      if (resume) {
+        debug.event('resume-loaded', {
+          name,
+          runsKept: resume.runs.length,
+          judgmentsKept: resume.judgments.length,
+        });
+      }
+    } catch (e) {
+      warn(`Could not initialize debug log: ${(e as Error).message}`);
+      debug = noopDebug();
+    }
+  }
+
   try {
     const total = prompts.length * cfg.runs.samples * 2;
     let runIdx = resume?.runs.length ?? 0;
@@ -212,6 +247,7 @@ export async function runCommand(opts: RunOptions): Promise<number> {
       currentSha,
       name,
       resume,
+      debug,
       onCheckpoint: async (partial) => {
         await saveSnapshot(partial, cfg.snapshots.dir);
       },
@@ -228,6 +264,12 @@ export async function runCommand(opts: RunOptions): Promise<number> {
       },
     });
     const path = await saveSnapshot(snap, cfg.snapshots.dir);
+    debug.event('snapshot-saved', {
+      path,
+      runs: snap.runs.length,
+      judgments: snap.judgments.length,
+      complete: true,
+    });
     ok(`Snapshot saved: ${path}`);
     info(`  baseline mean ${snap.summary.baseline.mean.toFixed(2)} (n=${snap.summary.baseline.n})`);
     info(`  current  mean ${snap.summary.current.mean.toFixed(2)} (n=${snap.summary.current.n})`);
@@ -258,5 +300,6 @@ export async function runCommand(opts: RunOptions): Promise<number> {
     return 0;
   } finally {
     if (baselineWt) await baselineWt.cleanup();
+    await debug.close();
   }
 }

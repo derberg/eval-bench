@@ -43,6 +43,7 @@ program
   .option('--force', 'Overwrite an existing complete snapshot with the same --save-as name')
   .option('--retry-failed', 'Re-run only failed rows in the existing snapshot (preserves successes)')
   .option('--dry-run', 'Print planned matrix without running')
+  .option('--debug', 'Write a per-event debug log to the snapshot dir and mirror to stderr')
   .option('-v, --verbose')
   .action(async (opts) => {
     const { runCommand } = await import('./run.js');
@@ -63,6 +64,7 @@ program
       force: Boolean(opts.force),
       retryFailed: Boolean(opts.retryFailed),
       dryRun: opts.dryRun,
+      debug: Boolean(opts.debug),
       verbose: opts.verbose,
     });
     process.exit(code);
@@ -88,6 +90,7 @@ program
     },
   )
   .option('--dry-run', 'Print planned matrix without running')
+  .option('--debug', 'Write a per-event debug log to the snapshot dir and mirror to stderr')
   .action(async (opts) => {
     const { evalCommand } = await import('./eval.js');
     const code = await evalCommand({
@@ -102,6 +105,7 @@ program
       retryFailed: Boolean(opts.retryFailed),
       only: opts.only,
       dryRun: opts.dryRun,
+      debug: Boolean(opts.debug),
     });
     process.exit(code);
   });

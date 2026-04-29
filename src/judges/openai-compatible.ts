@@ -1,5 +1,7 @@
 import { buildJudgePrompt } from './rubric.js';
 import { parseJudgeResponse, type ParsedJudgment } from './parse.js';
+import type { DebugLogger } from '../debug.js';
+import { noopDebug } from '../debug.js';
 
 export interface OpenAICompatibleJudgeOptions {
   endpoint: string;
@@ -10,17 +12,19 @@ export interface OpenAICompatibleJudgeOptions {
   prompt: string;
   output: string;
   rubric: string;
+  debug?: DebugLogger;
 }
 
 export async function judgeWithOpenAICompatible(
   opts: OpenAICompatibleJudgeOptions,
 ): Promise<ParsedJudgment & { raw: string }> {
+  const debug = opts.debug ?? noopDebug();
   const base = opts.endpoint.replace(/\/+$/, '');
   const headers: Record<string, string> = { 'content-type': 'application/json' };
   if (opts.apiKey) {
     headers['authorization'] = `Bearer ${opts.apiKey}`;
   }
-  const res = await fetch(`${base}/chat/completions`, {
+  const { res, bodyText } = await debug.fetch(`${base}/chat/completions`, {
     method: 'POST',
     headers,
     body: JSON.stringify({
@@ -32,9 +36,9 @@ export async function judgeWithOpenAICompatible(
     }),
   });
   if (!res.ok) {
-    throw new Error(`openai-compatible: HTTP ${res.status} ${await res.text()}`);
+    throw new Error(`openai-compatible: HTTP ${res.status} ${bodyText}`);
   }
-  const data = (await res.json()) as {
+  const data = JSON.parse(bodyText) as {
     choices?: Array<{ message?: { content?: string } }>;
   };
   const raw = data.choices?.[0]?.message?.content ?? '';

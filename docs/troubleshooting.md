@@ -35,6 +35,29 @@ provider:
 
 For faster iteration on the dev loop, also reduce `samples` to 1.
 
+## Diagnosing a slow Ollama judge
+
+If `eb run` looks frozen during the judge phase, run with `--debug`:
+
+```bash
+eb run --baseline main --save-as baseline --debug
+```
+
+Two things change:
+
+1. A per-invocation log lands at `.eval-bench/snapshots/<name>/debug-<ISO-timestamp>.log`. It contains every event the run emits, the full judge HTTP request and response bodies (sensitive headers redacted), and the subprocess command line for each Claude call.
+2. The same events are mirrored to stderr in color, with bodies truncated to head + tail for readability.
+
+The Ollama judge streams (`stream: true`), so `bodyTimeout` no longer fires during long generation. Streaming chunks are also logged as `http-chunk` heartbeats every 32 chunks — when the run is *actually* generating tokens, the log shows liveness; when it's stalled in prompt processing, you'll see no chunks for minutes (a strong hint that the prompt got bigger).
+
+`judge-end` events include Ollama's diagnostic fields when present:
+
+```
+[judge-end] rowId=foo::baseline::1 score=4 rawBytes=83 ollamaTimings={"promptEvalCount":4123,"promptEvalMs":58000,"evalCount":280,"evalMs":120000,"totalMs":178000}
+```
+
+Compare a fast snapshot's debug log to a slow one with `diff` to spot what changed — usually either `promptEvalCount` (prompt content grew) or `evalMs / evalCount` (generation got slower per token).
+
 ## "API key not set"
 
 For Anthropic / OpenAI judges, the key env var must be set:

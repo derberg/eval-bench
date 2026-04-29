@@ -1,5 +1,7 @@
 import { buildJudgePrompt } from './rubric.js';
 import { parseJudgeResponse, type ParsedJudgment } from './parse.js';
+import type { DebugLogger, OllamaStreamSummary } from '../debug.js';
+import { noopDebug } from '../debug.js';
 
 export interface OllamaJudgeOptions {
   endpoint: string;
@@ -9,28 +11,84 @@ export interface OllamaJudgeOptions {
   prompt: string;
   output: string;
   rubric: string;
+  debug?: DebugLogger;
 }
 
-export async function judgeWithOllama(
-  opts: OllamaJudgeOptions,
-): Promise<ParsedJudgment & { raw: string }> {
+export type OllamaJudgeResult = ParsedJudgment & {
+  raw: string;
+  timings: OllamaStreamSummary | null;
+};
+
+interface OllamaStreamChunk {
+  message?: { content?: string };
+  done?: boolean;
+  error?: string;
+  prompt_eval_count?: number;
+  prompt_eval_duration?: number;
+  eval_count?: number;
+  eval_duration?: number;
+  total_duration?: number;
+}
+
+export async function judgeWithOllama(opts: OllamaJudgeOptions): Promise<OllamaJudgeResult> {
+  const debug = opts.debug ?? noopDebug();
   const body = {
     model: opts.model,
-    stream: false,
+    stream: true,
     options: { temperature: opts.temperature, num_predict: opts.maxTokens },
     messages: [{ role: 'user', content: buildJudgePrompt(opts) }],
     format: 'json',
   };
-  const res = await fetch(`${opts.endpoint.replace(/\/+$/, '')}/api/chat`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-  });
+  const url = `${opts.endpoint.replace(/\/+$/, '')}/api/chat`;
+
+  let raw = '';
+  let timings: OllamaStreamSummary | null = null;
+  let streamErr: string | null = null;
+
+  const onLine = (line: string): void => {
+    let chunk: OllamaStreamChunk;
+    try {
+      chunk = JSON.parse(line) as OllamaStreamChunk;
+    } catch {
+      // Skip non-JSON keep-alives or partial frames; the next line resumes.
+      return;
+    }
+    if (chunk.error) {
+      streamErr = chunk.error;
+      return;
+    }
+    if (chunk.message?.content) raw += chunk.message.content;
+    if (chunk.done) {
+      timings = {
+        promptEvalCount: chunk.prompt_eval_count ?? 0,
+        promptEvalMs: nsToMs(chunk.prompt_eval_duration),
+        evalCount: chunk.eval_count ?? 0,
+        evalMs: nsToMs(chunk.eval_duration),
+        totalMs: nsToMs(chunk.total_duration),
+      };
+    }
+  };
+
+  const { res, bodyText } = await debug.fetch(
+    url,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+    { onStreamLine: onLine, expectStream: true },
+  );
+
   if (!res.ok) {
-    throw new Error(`ollama: HTTP ${res.status} ${await res.text()}`);
+    throw new Error(`ollama: HTTP ${res.status} ${bodyText}`);
   }
-  const data = (await res.json()) as { message?: { content?: string } };
-  const raw = data.message?.content ?? '';
+  if (streamErr) {
+    throw new Error(`ollama: ${streamErr}`);
+  }
   const parsed = parseJudgeResponse(raw);
-  return { ...parsed, raw };
+  return { ...parsed, raw, timings };
+}
+
+function nsToMs(ns: number | undefined): number {
+  return typeof ns === 'number' ? Math.round(ns / 1_000_000) : 0;
 }

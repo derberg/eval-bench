@@ -4,6 +4,8 @@ import { join, basename, relative } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import type { RunUsage } from './types.js';
+import type { DebugLogger } from './debug.js';
+import { noopDebug } from './debug.js';
 
 export interface InvokeClaudeOptions {
   command: string;
@@ -16,6 +18,7 @@ export interface InvokeClaudeOptions {
   // Absolute path to spawn the provider in. Created if missing. Null = inherit
   // the parent process cwd (legacy behavior).
   cwd: string | null;
+  debug?: DebugLogger;
 }
 
 export interface InvokeClaudeResult {
@@ -172,6 +175,7 @@ async function setupTempPlugin(pluginDir: string): Promise<TempPluginSetup | nul
 }
 
 export async function invokeClaude(opts: InvokeClaudeOptions): Promise<InvokeClaudeResult> {
+  const debug = opts.debug ?? noopDebug();
   // Setup temp plugin if needed
   const tempSetup = await setupTempPlugin(opts.pluginDir);
   const effectivePluginDir = tempSetup?.tempDir ?? opts.pluginDir;
@@ -200,6 +204,17 @@ export async function invokeClaude(opts: InvokeClaudeOptions): Promise<InvokeCla
       // workspaces, etc.).
       canonicalCwd = await realpath(opts.cwd);
     }
+    debug.event(
+      'subprocess-req',
+      {
+        command: opts.command,
+        argCount: args.length,
+        cwd: canonicalCwd,
+        pluginDir: effectivePluginDir,
+        timeoutMs: opts.timeoutMs,
+      },
+      JSON.stringify(args),
+    );
     const started = Date.now();
     try {
       const result = await execa(opts.command, args, {
@@ -214,6 +229,18 @@ export async function invokeClaude(opts: InvokeClaudeOptions): Promise<InvokeCla
       const durationMs = Date.now() - started;
       const rawStdout = result.stdout ?? '';
       const parsed = parseClaudeJson(rawStdout);
+      debug.event(
+        'subprocess-res',
+        {
+          exitCode: result.exitCode,
+          durationMs,
+          stdoutBytes: rawStdout.length,
+          stderrBytes: (result.stderr ?? '').length,
+          timedOut: Boolean(result.timedOut),
+          parsedJson: Boolean(parsed),
+        },
+        rawStdout,
+      );
       const output = parsed
         ? parsed.output
         : [rawStdout, result.stderr].filter(Boolean).join('\n');
@@ -242,6 +269,11 @@ export async function invokeClaude(opts: InvokeClaudeOptions): Promise<InvokeCla
     } catch (err) {
       const durationMs = Date.now() - started;
       const msg = err instanceof Error ? err.message : String(err);
+      debug.event('subprocess-res', {
+        exitCode: -1,
+        durationMs,
+        error: msg,
+      });
       return {
         output: '',
         exitCode: -1,

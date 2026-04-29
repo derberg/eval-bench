@@ -1,4 +1,5 @@
 import { resolve as resolvePath } from 'node:path';
+import { createHash } from 'node:crypto';
 import type {
   PromptSpec,
   Variant,
@@ -12,6 +13,8 @@ import type {
 import { invokeClaude } from './provider.js';
 import { judge, judgeConfigFromConfig, type JudgeConfig } from './judges/index.js';
 import { hashRubric } from './judges/rubric.js';
+import type { DebugLogger } from './debug.js';
+import { noopDebug } from './debug.js';
 
 interface CwdContext {
   snapshotsDir: string;
@@ -91,6 +94,7 @@ export interface RunBenchmarkOptions {
   resume?: Snapshot | null;
   onCheckpoint?: (partial: Snapshot) => Promise<void>;
   onProgress?: (ev: ProgressEvent) => void;
+  debug?: DebugLogger;
 }
 
 export type ProgressEvent =
@@ -199,11 +203,16 @@ function buildSnapshot(
   };
 }
 
+function shortHash(s: string): string {
+  return createHash('sha256').update(s).digest('hex').slice(0, 16);
+}
+
 async function judgeRun(
   row: MatrixRow,
   run: RunResult,
   judgeCfg: JudgeConfig,
   onProgress: RunBenchmarkOptions['onProgress'],
+  debug: DebugLogger,
 ): Promise<Judgment> {
   onProgress?.({ kind: 'judge-start', runId: row.id });
   let judgment: Judgment;
@@ -218,25 +227,55 @@ async function judgeRun(
       raw: '',
       error: 'run failed',
     };
+    debug.event('judge-end', {
+      rowId: row.id,
+      score: 0,
+      error: 'run failed',
+    });
   } else {
+    const judgePromptBytes = row.prompt.length + run.output.length + row.rubric.length;
+    debug.event('judge-start', {
+      rowId: row.id,
+      provider: judgeCfg.provider,
+      model: judgeCfg.model,
+      promptBytes: judgePromptBytes,
+      rubricHash: hashRubric(row.rubric),
+    });
     try {
-      const j = await judge(judgeCfg, {
-        prompt: row.prompt,
-        output: run.output,
-        rubric: row.rubric,
+      const j = await judge(
+        judgeCfg,
+        { prompt: row.prompt, output: run.output, rubric: row.rubric },
+        debug,
+      );
+      judgment = {
+        runId: run.id,
+        score: j.score,
+        rationale: j.rationale,
+        rubricHash: j.rubricHash,
+        judgeProvider: j.judgeProvider,
+        judgeModel: j.judgeModel,
+        raw: j.raw,
+        error: null,
+      };
+      debug.event('judge-end', {
+        rowId: row.id,
+        score: j.score,
+        rawBytes: j.raw.length,
+        ...(j.ollamaTimings && { ollamaTimings: j.ollamaTimings }),
       });
-      judgment = { runId: run.id, ...j, error: null };
     } catch (e) {
+      const msg = (e as Error).message;
       judgment = {
         runId: run.id,
         score: 0,
-        rationale: `judge failed: ${(e as Error).message}`,
+        rationale: `judge failed: ${msg}`,
         rubricHash: hashRubric(row.rubric),
         judgeProvider: judgeCfg.provider,
         judgeModel: judgeCfg.model,
         raw: '',
-        error: (e as Error).message,
+        error: msg,
       };
+      debug.event('judge-end', { rowId: row.id, score: 0, error: msg });
     }
   }
   onProgress?.({ kind: 'judge-end', runId: run.id, score: judgment.score });
@@ -247,6 +286,7 @@ async function runAndJudge(
   row: MatrixRow,
   opts: RunBenchmarkOptions,
   judgeCfg: JudgeConfig,
+  debug: DebugLogger,
 ): Promise<{ run: RunResult; judgment: Judgment }> {
   opts.onProgress?.({ kind: 'run-start', rowId: row.id });
   const pluginDir =
@@ -259,6 +299,14 @@ async function runAndJudge(
     sample: row.sample,
     pluginDir,
   });
+  debug.event('run-start', {
+    rowId: row.id,
+    variant: row.variant,
+    promptId: row.promptId,
+    sample: row.sample,
+    promptHash: shortHash(row.prompt),
+    cwd,
+  });
   const r = await invokeClaude({
     command: opts.config.provider.command,
     extraArgs: opts.config.provider.extraArgs,
@@ -268,12 +316,24 @@ async function runAndJudge(
     model: opts.config.provider.model,
     allowedTools: opts.config.provider.allowedTools,
     cwd,
+    debug,
   });
   opts.onProgress?.({
     kind: 'run-end',
     rowId: row.id,
     durationMs: r.durationMs,
     error: r.error,
+  });
+  debug.event('run-end', {
+    rowId: row.id,
+    exitCode: r.exitCode,
+    durationMs: r.durationMs,
+    outputBytes: r.output.length,
+    ...(r.usage && {
+      inputTokens: r.usage.inputTokens,
+      outputTokens: r.usage.outputTokens,
+    }),
+    ...(r.error && { error: r.error }),
   });
   const run: RunResult = {
     id: row.id,
@@ -289,11 +349,12 @@ async function runAndJudge(
     // when realpath couldn't run (no cwd configured).
     cwd: r.cwd ?? cwd,
   };
-  const judgment = await judgeRun(row, run, judgeCfg, opts.onProgress);
+  const judgment = await judgeRun(row, run, judgeCfg, opts.onProgress, debug);
   return { run, judgment };
 }
 
 export async function runBenchmark(opts: RunBenchmarkOptions): Promise<Snapshot> {
+  const debug = opts.debug ?? noopDebug();
   const matrix = expandMatrix(opts.prompts, opts.config.runs.samples, opts.variants);
   const judgeCfg = judgeConfigFromConfig(opts.config);
 
@@ -322,6 +383,15 @@ export async function runBenchmark(opts: RunBenchmarkOptions): Promise<Snapshot>
     // else: row is fully done (or run itself failed) — skip.
   }
 
+  debug.event('matrix-built', {
+    rows: matrix.length,
+    variants: opts.variants ?? ['baseline', 'current'],
+    samples: opts.config.runs.samples,
+    freshRows: fresh.length,
+    reJudgeRows: rejudge.length,
+    parallel: opts.config.runs.parallel,
+  });
+
   // Serialize checkpoint writes so concurrent rows don't corrupt the file.
   let writeChain: Promise<void> = Promise.resolve();
   const checkpoint = async (): Promise<void> => {
@@ -329,12 +399,17 @@ export async function runBenchmark(opts: RunBenchmarkOptions): Promise<Snapshot>
     const snap = buildSnapshot(opts, runs, judgments, false);
     writeChain = writeChain.then(() => opts.onCheckpoint!(snap));
     await writeChain;
+    debug.event('checkpoint', {
+      runs: snap.runs.length,
+      judgments: snap.judgments.length,
+      complete: false,
+    });
   };
 
   // Re-judge first: cheap, no Claude invocations.
   await mapWithConcurrency(rejudge, opts.config.runs.parallel, async (row) => {
     const cachedRun = runsById.get(row.id)!;
-    const newJudgment = await judgeRun(row, cachedRun, judgeCfg, opts.onProgress);
+    const newJudgment = await judgeRun(row, cachedRun, judgeCfg, opts.onProgress, debug);
     const idx = judgments.findIndex((j) => j.runId === row.id);
     if (idx >= 0) judgments[idx] = newJudgment;
     else judgments.push(newJudgment);
@@ -342,7 +417,7 @@ export async function runBenchmark(opts: RunBenchmarkOptions): Promise<Snapshot>
   });
 
   await mapWithConcurrency(fresh, opts.config.runs.parallel, async (row) => {
-    const { run, judgment } = await runAndJudge(row, opts, judgeCfg);
+    const { run, judgment } = await runAndJudge(row, opts, judgeCfg, debug);
     runs.push(run);
     judgments.push(judgment);
     await checkpoint();
