@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.9.0 — 2026-04-30
+
+**Features:**
+
+- **Verdict legend in `eb view`.** The hero now carries a row of seven chips — `win`, `cost win`, `stable`, `mixed`, `regression`, `cost regression`, `partial` — each with a colored dot and a one-line definition (e.g. `cost win • same quality, lower cost`). The chip matching the snapshot's actual verdict highlights with the accent border, scales up, and its dot gets a glow halo in its own color, so first-time readers can place "where on the scale this run sits" without consulting docs. Wraps to a column on narrow viewports.
+- **Brand mark in the topbar is now a bench icon** (matches the project name) instead of a pulsing green dot. Snapshot HTML `<title>` reads `<name> · eval-bench`.
+
+**Fixes:**
+
+- **Active legend chip's glow now matches its dot color.** The active state used `box-shadow: 0 0 12px currentColor` on the indicator, but `currentColor` resolved to the inherited foreground (cream/grey) instead of the chip's accent — so a `regression` chip had a dim cream halo instead of a red one. Indicator classes now set `color` (not `background`) and the dot draws from `currentColor`, so dot + glow always share the accent.
+- **Removed dead `.brand-dot` CSS and `@keyframes pulse`** left behind after the brand mark switched to an SVG icon.
+
 ## 0.8.2 — 2026-04-29
 
 **Features:**

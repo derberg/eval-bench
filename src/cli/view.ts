@@ -191,7 +191,7 @@ function renderHtml(s: Snapshot): string {
   const samples = s.config?.runs?.samples ?? '?';
 
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
-<title>${escape(s.name)} · evalforge</title>
+<title>${escape(s.name)} · eval-bench</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <script>(function(){try{var s=localStorage.getItem('ef-theme');var t=s||(matchMedia('(prefers-color-scheme: light)').matches?'light':'dark');document.documentElement.setAttribute('data-theme',t);}catch(e){document.documentElement.setAttribute('data-theme','dark');}})();</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -273,8 +273,7 @@ body{
 :root[data-theme="light"] .theme-toggle .icon-sun{display:none}
 :root[data-theme="light"] .theme-toggle .icon-moon{display:inline}
 .brand{display:flex;align-items:center;gap:0.7em;font-size:11px;letter-spacing:0.2em;text-transform:uppercase;color:var(--fg-soft)}
-.brand-dot{width:8px;height:8px;border-radius:50%;background:var(--good);box-shadow:0 0 12px var(--good);animation:pulse 2.4s ease-in-out infinite}
-@keyframes pulse{0%,100%{opacity:0.4}50%{opacity:1}}
+.brand-icon{width:18px;height:18px;color:var(--accent);flex:none}
 .brand strong{color:var(--fg);font-weight:500;letter-spacing:0.18em}
 .topbar-meta{font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:var(--mute);text-align:right;line-height:1.7}
 .topbar-meta b{color:var(--fg-soft);font-weight:400;text-transform:none;letter-spacing:0.02em}
@@ -307,6 +306,24 @@ body{
 .reasons{margin-top:1.8em;display:flex;flex-wrap:wrap;gap:0.5em}
 .reason{font-size:10.5px;letter-spacing:0.1em;text-transform:uppercase;padding:0.45em 0.85em;border:1px solid var(--line);color:var(--fg-soft);background:var(--bg-elev)}
 .reason::before{content:'›';margin-right:0.55em;color:var(--mute)}
+
+/* === VERDICT SCALE === */
+.verdict-scale{margin-top:2.4em;padding:1.6em 0 0;border-top:1px solid var(--line-soft)}
+.verdict-scale-title{font-size:9px;letter-spacing:0.28em;text-transform:uppercase;color:var(--mute);margin-bottom:1.2em}
+.verdict-items{display:flex;gap:0.8em;flex-wrap:wrap}
+.verdict-item{display:flex;align-items:center;gap:0.7em;padding:0.65em 1em;border:1px solid var(--line);background:var(--bg-elev);transition:all 0.2s;font-size:11px}
+.verdict-item-indicator{width:8px;height:8px;border-radius:50%;flex:none;transition:transform 0.2s;background:currentColor}
+.verdict-item-indicator.good{color:var(--good)}
+.verdict-item-indicator.bad{color:var(--bad)}
+.verdict-item-indicator.mixed{color:var(--warn)}
+.verdict-item-indicator.neutral{color:var(--accent)}
+.verdict-item-indicator.partial{color:var(--mute)}
+.verdict-item-label{font-weight:500;color:var(--fg-soft);letter-spacing:0.02em;white-space:nowrap}
+.verdict-item-desc{color:var(--mute);font-size:10px}
+.verdict-item.active{border-color:var(--accent);background:color-mix(in srgb, var(--accent) 12%, var(--bg-elev));transform:scale(1.05)}
+.verdict-item.active .verdict-item-indicator{transform:scale(1.5);box-shadow:0 0 12px currentColor}
+.verdict-item.active .verdict-item-label{color:var(--fg)}
+.verdict-item.active .verdict-item-desc{color:var(--fg-soft)}
 
 /* === METRICS === */
 .metrics{display:grid;grid-template-columns:repeat(3,1fr);border-bottom:1px solid var(--line-soft)}
@@ -415,13 +432,21 @@ section h3{font-family:'Instrument Serif',serif;font-style:italic;font-weight:40
   .topbar{flex-direction:column;align-items:flex-start;gap:0.6em}
   .topbar-meta{text-align:left}
   .topbar-right{flex-direction:row;align-items:flex-start;gap:0.8em;width:100%;justify-content:space-between}
+  .verdict-items{flex-direction:column}
+  .verdict-item{width:100%}
 }
 </style></head>
 <body>
 <div class="topbar">
   <div class="brand">
-    <span class="brand-dot"></span>
-    <span><strong>evalforge</strong> // snapshot view</span>
+    <svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M2 9h20"/>
+      <path d="M2 12h20"/>
+      <path d="M5 12v8"/>
+      <path d="M19 12v8"/>
+      <path d="M5 16h14"/>
+    </svg>
+    <span><strong>eval-bench</strong> // snapshot view</span>
   </div>
   <div class="topbar-right">
     <div class="topbar-meta">
@@ -441,6 +466,47 @@ section h3{font-family:'Instrument Serif',serif;font-style:italic;font-weight:40
   <h1>${escape(verdict.label)}<span class="name">${escape(s.name)}</span></h1>
   <p class="hero-hook">${escape(verdict.hook)}</p>
   ${verdict.reasons.length ? `<div class="reasons">${verdict.reasons.map((r) => `<span class="reason">${escape(r)}</span>`).join('')}</div>` : ''}
+  
+  <div class="verdict-scale">
+    <div class="verdict-scale-title">all possible verdicts</div>
+    <div class="verdict-items">
+      <div class="verdict-item ${verdict.label === 'win' ? 'active' : ''}">
+        <div class="verdict-item-indicator good"></div>
+        <div class="verdict-item-label">win</div>
+        <div class="verdict-item-desc">• better quality</div>
+      </div>
+      <div class="verdict-item ${verdict.label === 'cost win' ? 'active' : ''}">
+        <div class="verdict-item-indicator good"></div>
+        <div class="verdict-item-label">cost win</div>
+        <div class="verdict-item-desc">• same quality, lower cost</div>
+      </div>
+      <div class="verdict-item ${verdict.label === 'stable' ? 'active' : ''}">
+        <div class="verdict-item-indicator neutral"></div>
+        <div class="verdict-item-label">stable</div>
+        <div class="verdict-item-desc">• no meaningful change</div>
+      </div>
+      <div class="verdict-item ${verdict.label === 'mixed' ? 'active' : ''}">
+        <div class="verdict-item-indicator mixed"></div>
+        <div class="verdict-item-label">mixed</div>
+        <div class="verdict-item-desc">• trade-offs present</div>
+      </div>
+      <div class="verdict-item ${verdict.label === 'regression' ? 'active' : ''}">
+        <div class="verdict-item-indicator bad"></div>
+        <div class="verdict-item-label">regression</div>
+        <div class="verdict-item-desc">• quality dropped</div>
+      </div>
+      <div class="verdict-item ${verdict.label === 'cost regression' ? 'active' : ''}">
+        <div class="verdict-item-indicator bad"></div>
+        <div class="verdict-item-label">cost regression</div>
+        <div class="verdict-item-desc">• same quality, higher cost</div>
+      </div>
+      <div class="verdict-item ${verdict.klass === 'partial' ? 'active' : ''}">
+        <div class="verdict-item-indicator partial"></div>
+        <div class="verdict-item-label">${verdict.klass === 'partial' ? escape(verdict.label) : 'partial'}</div>
+        <div class="verdict-item-desc">• incomplete comparison</div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <div class="metrics">
