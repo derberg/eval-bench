@@ -24,7 +24,7 @@ sequenceDiagram
         ef->>claude: spawn with plugin dir + prompt
         claude-->>ef: stdout
     end
-    Note right of ef: with --baseline-from <name>,<br/>baseline runs are reused<br/>from a saved snapshot
+    Note right of ef: with --baseline-from <name>,<br/>baseline runs are reused<br/>from a saved snapshot.<br/>--current-from <name> does the<br/>same for the current side.
 
     Note over ef,judge: Judge phase (parallel)
     loop each run
@@ -76,6 +76,11 @@ eb run --baseline-from v1-baseline --save-as wip --compare v1-baseline
 # narrow the matrix to one or a few prompts while iterating on a rubric
 eb run --baseline-from v1-baseline --save-as wip --only find-user-by-email
 
+# already have an `eb eval` snapshot at HEAD? promote it to a dual-variant
+# snapshot by stitching it against the saved baseline — no fresh claude runs,
+# both `eb compare` and `eb view` work
+eb run --baseline-from v1-baseline --current-from wip --save-as wip-vs-v1
+
 # a few rows failed yesterday (judge timeout, quota)? re-run only those
 eb run --baseline main --save-as baseline --retry-failed
 
@@ -88,7 +93,7 @@ eb run --baseline main --save-as baseline --debug
 eb view wip
 ```
 
-`eb eval` produces a single-variant snapshot (one ref). `eb run --baseline-from <name>` reuses it instead of regenerating the baseline side, so each iteration only pays for the current ref. `--only <ids>` (comma-separated, repeatable) restricts the matrix to specific prompt ids — useful when iterating on one rubric. Plain `eb run --baseline <ref> --current <ref>` still works when you want to A/B two refs in one shot (CI gating).
+`eb eval` produces a single-variant snapshot (one ref). `eb run --baseline-from <name>` reuses it instead of regenerating the baseline side, so each iteration only pays for the current ref. The mirror `--current-from <name>` reuses a saved snapshot's runs for the *current* side instead — combine both to stitch two `eb eval` snapshots into one dual-variant snapshot with zero fresh runs (handy when you've already evaluated both sides and just want a `view`-able A/B). `--only <ids>` (comma-separated, repeatable) restricts the matrix to specific prompt ids — useful when iterating on one rubric. Plain `eb run --baseline <ref> --current <ref>` still works when you want to A/B two refs in one shot (CI gating).
 
 Full walkthrough: [docs/quickstart.md](docs/quickstart.md).
 

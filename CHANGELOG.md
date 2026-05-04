@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.10.0 — 2026-05-04
+
+**Features:**
+
+- **`--current-from <snapshot>` on `eb run`.** Mirrors `--baseline-from`: reuse a saved snapshot's runs for the *current* side instead of re-executing them. Useful when you already have an `eb eval` snapshot at HEAD and want to pair it with a saved baseline without re-running the current ref. Combining `--baseline-from` and `--current-from` stitches two single-variant snapshots into a single dual-variant snapshot with zero fresh claude or judge calls — which is the snapshot shape `eb view` requires (`eb compare` already worked across single-variant snapshots, but `eb view` needs both variants in one snapshot file). `--current-from` is mutually exclusive with `--current`. The `--current` flag's commander default (`HEAD`) was moved into the runner so the mutual-exclusion check can distinguish "user passed --current" from "we defaulted it" — observable behavior is identical.
+
 ## 0.9.0 — 2026-04-30
 
 **Features:**

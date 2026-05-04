@@ -24,7 +24,8 @@ program
   .option('--plugin <path>', 'Path to plugin')
   .option('--baseline <ref>', 'Git ref for baseline')
   .option('--baseline-from <name>', 'Reuse baseline runs from a saved snapshot instead of regenerating them')
-  .option('--current <ref>', 'Git ref for current', 'HEAD')
+  .option('--current <ref>', 'Git ref for current')
+  .option('--current-from <name>', 'Reuse current runs from a saved snapshot instead of regenerating them')
   .option('--prompts <file>', 'Prompts file', './.eval-bench/prompts.yaml')
   .option('--config <file>', 'Config file', './.eval-bench/eval-bench.yaml')
   .option('--samples <n>', 'Override samples-per-prompt', (v) => parseInt(v, 10))
@@ -53,6 +54,7 @@ program
       baseline: opts.baseline,
       baselineFrom: opts.baselineFrom,
       current: opts.current,
+      currentFrom: opts.currentFrom,
       prompts: opts.prompts,
       config: opts.config,
       samples: opts.samples,

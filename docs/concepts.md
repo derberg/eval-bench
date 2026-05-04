@@ -14,7 +14,7 @@
 
 **Baseline** — the plugin version you are comparing *against*. Usually a tag or commit SHA (e.g. `v1.0.0`, `origin/main`). With `eb run`, resolved via `git rev-parse` and checked out into a temporary worktree. With `eb run --baseline-from <snapshot>`, the baseline side is loaded from a previously saved snapshot — no rerun, no worktree.
 
-**Current** — the plugin version you are comparing. Defaults to `HEAD` (your working tree).
+**Current** — the plugin version you are comparing. Defaults to `HEAD` (your working tree). With `eb run --current-from <snapshot>`, the current side is loaded from a previously saved snapshot instead — useful when you already have an `eb eval` snapshot at HEAD and just want to pair it with a saved baseline. Combining `--baseline-from` and `--current-from` stitches two snapshots into a dual-variant snapshot with zero fresh runs.
 
 **Variant** — either `baseline` or `current`. `eb run` produces both. `eb eval` produces a single-variant snapshot (`current`-labeled internally; the baseline slot stays empty until you compare against it).
 

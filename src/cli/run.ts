@@ -14,6 +14,7 @@ export interface RunOptions {
   baseline?: string;
   baselineFrom?: string;
   current?: string;
+  currentFrom?: string;
   prompts?: string;
   config?: string;
   samples?: number;
@@ -48,6 +49,10 @@ export async function runCommand(opts: RunOptions): Promise<number> {
     err('--baseline-from and --baseline are mutually exclusive');
     return 1;
   }
+  if (opts.currentFrom && opts.current) {
+    err('--current-from and --current are mutually exclusive');
+    return 1;
+  }
   if (opts.retryFailed && opts.force) {
     err('--retry-failed and --force are mutually exclusive');
     return 1;
@@ -58,12 +63,19 @@ export async function runCommand(opts: RunOptions): Promise<number> {
   const allPrompts = loadPrompts(promptsPath);
   const prompts = opts.only?.length ? filterPrompts(allPrompts, opts.only) : allPrompts;
   const gitRoot = cfg.plugin.gitRoot;
-  const currentRef = opts.current ?? 'HEAD';
   const name = opts.saveAs ?? new Date().toISOString().replace(/[:.]/g, '-');
+  const wantPromptIds = new Set(prompts.map((p) => p.id));
 
   let baselineRef: string;
   let baselineSha: string;
+  let currentRef: string;
+  let currentSha: string;
   let cachedBaseline: {
+    runs: RunResult[];
+    judgments: Judgment[];
+    sourceName: string;
+  } | null = null;
+  let cachedCurrent: {
     runs: RunResult[];
     judgments: Judgment[];
     sourceName: string;
@@ -75,7 +87,6 @@ export async function runCommand(opts: RunOptions): Promise<number> {
     baselineSha = cached.plugin.currentSha || cached.plugin.baselineSha;
     // Pull successful current-variant runs within the requested sample budget,
     // restricted to the prompts we'll actually evaluate this run.
-    const wantPromptIds = new Set(prompts.map((p) => p.id));
     const sourceRuns = cached.runs.filter(
       (r) =>
         r.variant === 'current' &&
@@ -101,7 +112,33 @@ export async function runCommand(opts: RunOptions): Promise<number> {
     baselineRef = opts.baseline ?? 'HEAD~1';
     baselineSha = await resolveSha(gitRoot, baselineRef);
   }
-  const currentSha = await resolveSha(gitRoot, currentRef);
+
+  if (opts.currentFrom) {
+    const cached = await loadSnapshot(cfg.snapshots.dir, opts.currentFrom);
+    currentRef = cached.plugin.currentRef || cached.plugin.baselineRef;
+    currentSha = cached.plugin.currentSha || cached.plugin.baselineSha;
+    // Same filter as baseline-from, but no variant remap: current-variant runs
+    // stay current, and their IDs already match the format the new matrix
+    // would generate (`${promptId}::current::${sample}`).
+    const sourceRuns = cached.runs.filter(
+      (r) =>
+        r.variant === 'current' &&
+        wantPromptIds.has(r.promptId) &&
+        r.sample <= cfg.runs.samples &&
+        r.error === null &&
+        r.output.length > 0,
+    );
+    const sourceRunIds = new Set(sourceRuns.map((r) => r.id));
+    const sourceJudgments = cached.judgments.filter((j) => sourceRunIds.has(j.runId));
+    cachedCurrent = {
+      runs: sourceRuns.map((r) => ({ ...r })),
+      judgments: sourceJudgments.map((j) => ({ ...j })),
+      sourceName: opts.currentFrom,
+    };
+  } else {
+    currentRef = opts.current ?? 'HEAD';
+    currentSha = await resolveSha(gitRoot, currentRef);
+  }
 
   info(`Plugin:   ${cfg.plugin.path}`);
   if (opts.only?.length) {
@@ -114,7 +151,13 @@ export async function runCommand(opts: RunOptions): Promise<number> {
   } else {
     info(`Baseline: ${baselineRef}`);
   }
-  info(`Current:  ${currentRef}`);
+  if (cachedCurrent) {
+    info(
+      `Current:  ${currentRef} (cached from snapshot "${cachedCurrent.sourceName}", sha=${currentSha.slice(0, 8)}, ${cachedCurrent.runs.length} runs reused)`,
+    );
+  } else {
+    info(`Current:  ${currentRef}`);
+  }
   info(`Judge:    ${cfg.judge.provider}/${cfg.judge.model}`);
   info(
     `Matrix:   ${prompts.length} prompts × ${cfg.runs.samples} samples × 2 variants = ${prompts.length * cfg.runs.samples * 2} runs`,
@@ -157,18 +200,23 @@ export async function runCommand(opts: RunOptions): Promise<number> {
     return 1;
   }
 
-  if (cachedBaseline) {
-    // Inject cached baseline runs/judgments into the resume bag — runBenchmark
-    // dedups by row ID, so they're skipped instead of re-executed.
+  if (cachedBaseline || cachedCurrent) {
+    // Inject cached runs/judgments into the resume bag — runBenchmark dedups
+    // by row ID, so they're skipped instead of re-executed.
+    const cachedRuns = [...(cachedBaseline?.runs ?? []), ...(cachedCurrent?.runs ?? [])];
+    const cachedJudgments = [
+      ...(cachedBaseline?.judgments ?? []),
+      ...(cachedCurrent?.judgments ?? []),
+    ];
     if (resume) {
       const haveRunIds = new Set(resume.runs.map((r) => r.id));
       const haveJudgmentRunIds = new Set(resume.judgments.map((j) => j.runId));
       resume = {
         ...resume,
-        runs: [...resume.runs, ...cachedBaseline.runs.filter((r) => !haveRunIds.has(r.id))],
+        runs: [...resume.runs, ...cachedRuns.filter((r) => !haveRunIds.has(r.id))],
         judgments: [
           ...resume.judgments,
-          ...cachedBaseline.judgments.filter((j) => !haveJudgmentRunIds.has(j.runId)),
+          ...cachedJudgments.filter((j) => !haveJudgmentRunIds.has(j.runId)),
         ],
       };
     } else {
@@ -186,8 +234,8 @@ export async function runCommand(opts: RunOptions): Promise<number> {
         config: cfg,
         judge: { provider: cfg.judge.provider, model: cfg.judge.model },
         prompts,
-        runs: cachedBaseline.runs,
-        judgments: cachedBaseline.judgments,
+        runs: cachedRuns,
+        judgments: cachedJudgments,
         summary: {
           baseline: { n: 0, mean: 0, median: 0, variance: 0 },
           current: { n: 0, mean: 0, median: 0, variance: 0 },
@@ -241,7 +289,7 @@ export async function runCommand(opts: RunOptions): Promise<number> {
       config: cfg,
       prompts,
       baselinePluginDir: baselineWt?.path ?? '',
-      currentPluginDir: gitRoot,
+      currentPluginDir: cachedCurrent ? '' : gitRoot,
       baselineRef,
       baselineSha,
       currentRef,
