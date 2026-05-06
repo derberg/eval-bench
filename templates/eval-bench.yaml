@@ -21,6 +21,36 @@ judge:
   endpoint: http://localhost:11434
   temperature: 0
   maxTokens: 1024
+  # Override the wrapping judge prompt — replaces the default below for every
+  # judge call. Must contain {{prompt}}, {{output}}, {{rubric}} placeholders.
+  # The CLI flag --judge-template <inline template> takes precedence over this
+  # value when both are set.
+  #
+  # Default (this is what's sent when `template:` stays unset):
+  #
+  #     You are an impartial evaluator. You are given a PROMPT, an assistant's OUTPUT,
+  #     and a RUBRIC describing what a good output looks like. Grade the OUTPUT strictly by
+  #     the RUBRIC.
+  #
+  #     Return ONLY a JSON object on a single line with exactly these fields:
+  #       "score":     number in [0, 5]  (can be fractional, e.g. 3.5)
+  #       "rationale": string (1-3 sentences explaining the score)
+  #
+  #     Do not include any other text.
+  #
+  #     -----
+  #     PROMPT:
+  #     {{prompt}}
+  #     -----
+  #     OUTPUT:
+  #     {{output}}
+  #     -----
+  #     RUBRIC:
+  #     {{rubric}}
+  #     -----
+  #
+  # template: |
+  #   ...your custom template here. Must contain {{prompt}}, {{output}}, {{rubric}}.
 
 runs:
   samples: 3

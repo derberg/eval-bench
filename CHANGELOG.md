@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.15.1 — 2026-05-06
+
+**Polish:**
+
+- **`eb init` now scaffolds the verbatim default judge template as a comment** under `judge:` in the generated `eval-bench.yaml`, with a commented `# template: |` placeholder right below it. Users can read exactly what's being sent to the judge today and uncomment-and-edit to override — no need to chase the default through `docs/judges.md` first. A new test (`cli.init` → "scaffolded eval-bench.yaml shows the verbatim DEFAULT_TEMPLATE in a comment") pins the scaffold's body line-by-line against `DEFAULT_TEMPLATE` so the two cannot silently drift.
+
 ## 0.15.0 — 2026-05-06
 
 **Breaking:**
