@@ -450,16 +450,31 @@ export async function runCommand(opts: RunOptions): Promise<number> {
         }
       },
     });
+    // Always write the snapshot. With --no-save it lands in a tempdir; the
+    // configured `snapshots.dir` stays untouched. We persist even ephemeral
+    // runs so the user can read the actual claude outputs and open view.html
+    // — losing those was the iteration-killer of the original --no-save.
+    const path = await saveSnapshot(snap, cfg.snapshots.dir);
+    debug.event('snapshot-saved', {
+      path,
+      runs: snap.runs.length,
+      judgments: snap.judgments.length,
+      complete: true,
+    });
     if (noSave) {
-      ok(`Run complete (ephemeral — nothing written to disk)`);
+      // Render view.html into the tempdir so the user has a one-click path
+      // to the side-by-side HTML without needing to remember a flag.
+      const { viewCommand } = await import('./view.js');
+      await viewCommand({ dir: cfg.snapshots.dir, name, writeHtml: true, open: false });
+      const snapshotDir = join(cfg.snapshots.dir, name);
+      ok(`Run complete (ephemeral — kept under tempdir, not under snapshots.dir)`);
+      info('');
+      info(`  ▸ Outputs:   ${snapshotDir}/`);
+      info(`  ▸ View HTML: ${join(snapshotDir, 'view.html')}`);
+      info(`  ▸ View CLI:  eval-bench view ${name} --snapshot-dir ${cfg.snapshots.dir}`);
+      info('');
+      info(`  Tempdir auto-cleans with /tmp on reboot.`);
     } else {
-      const path = await saveSnapshot(snap, cfg.snapshots.dir);
-      debug.event('snapshot-saved', {
-        path,
-        runs: snap.runs.length,
-        judgments: snap.judgments.length,
-        complete: true,
-      });
       ok(`Snapshot saved: ${path}`);
     }
     if (snap.summary.baseline.n > 0) {
@@ -515,11 +530,8 @@ export async function runCommand(opts: RunOptions): Promise<number> {
   } finally {
     if (baselineWt) await baselineWt.cleanup();
     await debug.close();
-    if (ephemeralDir) {
-      // Best-effort cleanup of the ephemeral snapshots dir. The provider may
-      // have written per-row cwds underneath; rm -rf is the only thing that
-      // covers all the templating shapes.
-      rmSync(ephemeralDir, { recursive: true, force: true });
-    }
+    // Don't remove the ephemeral dir — the user may want to inspect model
+    // outputs, open view.html, or paste the snapshot path back into
+    // `eval-bench view --snapshot-dir <path>`. /tmp cleanup is OS-driven.
   }
 }

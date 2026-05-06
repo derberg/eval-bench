@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.13.0 — 2026-05-06
+
+**Features:**
+
+- **`--no-save` now keeps the tempdir and auto-renders `view.html`.** Pre-0.13, the ephemeral run rm-rf'd its tempdir on exit — which meant the user could read the judge's rationale on stdout but couldn't see the actual model outputs, couldn't open the side-by-side HTML, and had no way to refer back to a row that scored interestingly. Now the tempdir persists (OS-driven `/tmp` cleanup eventually reclaims it on reboot), `view.html` is rendered automatically at the end of the run, and the CLI prints three copy-pasteable lines: the snapshot directory path, the absolute `view.html` path, and an `eval-bench view <name> --snapshot-dir <tempdir>` form for re-rendering. The configured `snapshots.dir` is still left untouched, so `--no-save` still does what its name says w.r.t. the persistent store.
+- **`eval-bench view --snapshot-dir <path>`** lets `view` read a snapshot from any directory, not just `snapshots.dir`. Mainly there to make the `--no-save` printed hint actually executable, but also useful for inspecting a snapshot copied or moved out of band, or rendering a colleague's snapshot dir without rewriting your local config.
+
 ## 0.12.3 — 2026-05-06
 
 **Docs:**

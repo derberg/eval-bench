@@ -140,8 +140,12 @@ async function snapshotsDir(): Promise<string> {
 program
   .command('view [snapshot]')
   .description('Render an HTML view for a snapshot and open it.')
-  .action(async (snapshotName) => {
-    const dir = await snapshotsDir();
+  .option(
+    '--snapshot-dir <path>',
+    'Snapshots root to read from. Defaults to snapshots.dir in eval-bench.yaml. Use this to view ephemeral runs left in /tmp by --no-save.',
+  )
+  .action(async (snapshotName, opts) => {
+    const dir = opts.snapshotDir ?? (await snapshotsDir());
     const { listSnapshots } = await import('../snapshot.js');
     const name = snapshotName ?? (await listSnapshots(dir)).at(-1);
     if (!name) {

@@ -69,12 +69,71 @@ describe('eb run --no-save', () => {
     expect(exitCode).toBe(0);
     expect(stdout).toMatch(/ephemeral/);
     expect(stdout).toMatch(/Run complete/);
-    // The configured snapshots dir must not contain anything — the ephemeral
-    // run wrote to a tempdir that gets cleaned up at the end.
+    // The configured snapshots dir must stay untouched. The ephemeral run
+    // writes to a tempdir under /tmp instead. (Pre-0.13 the tempdir was
+    // rm-rf'd on exit; 0.13+ keeps it so the user can read outputs and
+    // open view.html — see the next test.)
     if (existsSync(join(repo, 'snaps'))) {
       const entries = await readdir(join(repo, 'snaps'));
       expect(entries).toHaveLength(0);
     }
+  }, 60_000);
+
+  it('keeps the tempdir, writes view.html, and prints copy-pasteable view paths', async () => {
+    const repo = await makeRepo();
+    const { exitCode, stdout } = await execa(
+      'npx',
+      ['tsx', cliPath, 'run', '--baseline', 'v1', '--no-save', '--only', 'p1', ...sharedArgs],
+      { cwd: repo, reject: false },
+    );
+    expect(exitCode).toBe(0);
+    // The CLI must print the snapshot dir, the view.html path, and the
+    // copy-pasteable `view --snapshot-dir` form. Without these the user
+    // can't get to the actual model outputs — which was the whole point of
+    // keeping the tempdir.
+    const tempPathMatch = stdout.match(/Outputs:\s+(\S+)\//);
+    expect(tempPathMatch, `expected stdout to print 'Outputs: <path>/' — got:\n${stdout}`).not.toBeNull();
+    const snapshotDir = tempPathMatch![1];
+    expect(stdout).toMatch(/View HTML:\s+\S+\/view\.html/);
+    expect(stdout).toMatch(/eval-bench view \S+ --snapshot-dir \S+/);
+    // The promised paths must actually exist after the run — pre-fix, they
+    // were rm-rf'd before the user could read this hint.
+    expect(existsSync(snapshotDir)).toBe(true);
+    expect(existsSync(join(snapshotDir, 'snapshot.json'))).toBe(true);
+    expect(existsSync(join(snapshotDir, 'view.html'))).toBe(true);
+  }, 60_000);
+
+  it('view --snapshot-dir <path> can render an ephemeral snapshot from outside the configured snapshots dir', async () => {
+    const repo = await makeRepo();
+    // First, run an ephemeral matrix and capture the printed snapshot dir.
+    const run = await execa(
+      'npx',
+      ['tsx', cliPath, 'run', '--baseline', 'v1', '--no-save', '--only', 'p1', ...sharedArgs],
+      { cwd: repo, reject: false },
+    );
+    expect(run.exitCode).toBe(0);
+    const tempPathMatch = run.stdout.match(/Outputs:\s+(\S+?)\/[^/\s]+\/$/m)
+      ?? run.stdout.match(/Outputs:\s+(\S+)\/[^/\s]+\//);
+    expect(tempPathMatch, `expected stdout to print Outputs path — got:\n${run.stdout}`).not.toBeNull();
+    // The "Outputs: <root>/<name>/" line — strip the trailing /<name>/ to
+    // get the snapshots root.
+    const snapshotsRoot = tempPathMatch![1];
+    const nameMatch = run.stdout.match(/eval-bench view (\S+) --snapshot-dir (\S+)/);
+    expect(nameMatch).not.toBeNull();
+    const name = nameMatch![1];
+    const printedDir = nameMatch![2];
+
+    // Now invoke `view <name> --snapshot-dir <printedDir>` — should succeed
+    // without needing the configured snapshots.dir to contain anything.
+    const view = await execa(
+      'npx',
+      ['tsx', cliPath, 'view', name, '--snapshot-dir', printedDir],
+      { cwd: repo, reject: false },
+    );
+    expect(view.exitCode).toBe(0);
+    expect(view.stdout + view.stderr).toMatch(new RegExp(`opened view for snapshot "${name}"`));
+    // Sanity: view.html should now exist (if it didn't already from the run).
+    expect(existsSync(join(snapshotsRoot, name, 'view.html'))).toBe(true);
   }, 60_000);
 
   it('prints the judge rationale to stdout so the user can read it without opening view.html', async () => {
