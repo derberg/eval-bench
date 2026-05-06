@@ -38,6 +38,10 @@ program
     },
   )
   .option('--judge <spec>', 'Override judge, e.g. ollama:qwen2.5:14b')
+  .option(
+    '--judge-template <path>',
+    'Override the judge prompt template (the wrapping instructions sent around every {prompt, output, rubric} triple). Reads <path>; must contain {{prompt}}, {{output}}, {{rubric}}.',
+  )
   .option('--save-as <name>', 'Save snapshot under this name')
   .option(
     '--no-save',
@@ -69,6 +73,7 @@ program
       samples: opts.samples,
       only: opts.only,
       judge: opts.judge,
+      judgeTemplate: opts.judgeTemplate,
       saveAs: opts.saveAs,
       // commander's --no-save flips opts.save to false; otherwise it's
       // undefined. Normalize to a boolean so downstream code can treat
@@ -96,6 +101,10 @@ program
   .option('--prompts <file>', 'Prompts file', './.eval-bench/prompts.yaml')
   .option('--config <file>', 'Config file', './.eval-bench/eval-bench.yaml')
   .option('--judge <spec>', 'Override judge, e.g. ollama:qwen2.5:14b')
+  .option(
+    '--judge-template <path>',
+    'Override the judge prompt template (the wrapping instructions sent around every {prompt, output, rubric} triple). Reads <path>; must contain {{prompt}}, {{output}}, {{rubric}}.',
+  )
   .option('--force', 'Overwrite an existing complete snapshot with the same name')
   .option('--retry-failed', 'Re-run only failed rows in the existing snapshot (preserves successes)')
   .option(
@@ -117,6 +126,7 @@ program
       prompts: opts.prompts,
       config: opts.config,
       judge: opts.judge,
+      judgeTemplate: opts.judgeTemplate,
       saveAs: opts.saveAs,
       force: Boolean(opts.force),
       retryFailed: Boolean(opts.retryFailed),

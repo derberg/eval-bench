@@ -32,6 +32,11 @@ export interface Config {
     apiKeyEnv: string | null;
     temperature: number;
     maxTokens: number;
+    // Optional override for the wrapping judge prompt sent around every
+    // {prompt, output, rubric} triple. Null = use DEFAULT_TEMPLATE from
+    // src/judges/rubric.ts. Templates must contain {{prompt}}, {{output}},
+    // and {{rubric}} placeholders or the run errors before any judge call.
+    template: string | null;
   };
   runs: {
     samples: number;

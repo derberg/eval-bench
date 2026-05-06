@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.14.0 — 2026-05-06
+
+**Features:**
+
+- **`judge.template` in `eval-bench.yaml` and `--judge-template <path>` on the CLI** override the wrapping prompt sent around every `{prompt, output, rubric}` triple. Pre-fix the wrapper was hardcoded — users could only edit per-prompt rubrics, not the system-level instructions or the JSON contract sent to the judge. Both override paths are validated up front (must contain `{{prompt}}`, `{{output}}`, `{{rubric}}`); invalid templates fail config-load before any judge call instead of producing all-zero rows. The CLI flag wins when both are set, useful for one-off prompt-engineering experiments without committing to the YAML. All seven judge backends (Ollama, Anthropic, OpenAI, OpenAI-compatible, OpenRouter, GitHub Models, Claude CLI) honor the same override.
+
+**Docs:**
+
+- **`docs/judges.md` now embeds the verbatim default judge prompt** so users can see exactly what they're overriding before they replace it. Includes both override paths and the placeholder contract. A new test (`docs.core` → "judges.md embeds the verbatim DEFAULT_TEMPLATE") pins the docs against `DEFAULT_TEMPLATE` exported from `src/judges/rubric.ts` so the two cannot silently drift.
+
+**Schema:**
+
+- `Config['judge']` adds `template: string | null` (default `null`). `JudgeConfig` adds the same field. Existing snapshots and configs without `template` continue to work unchanged.
+
 ## 0.13.0 — 2026-05-06
 
 **Features:**

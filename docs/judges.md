@@ -23,6 +23,75 @@ A judge is the LLM that grades each output against your rubric. The choice affec
 
 If you're starting out, default to **Ollama**. If you don't want to install Ollama, **GitHub Models** is the next-easiest free path. Reserve paid judges for release gates where the extra signal is worth the cost.
 
+## Customizing the judge prompt
+
+Every judge backend (Ollama, Anthropic, OpenAI, OpenAI-compatible, OpenRouter, GitHub Models, Claude CLI) sends the same wrapping prompt around your `{prompt, output, rubric}` triple. By default it's:
+
+```text
+You are an impartial evaluator. You are given a PROMPT, an assistant's OUTPUT,
+and a RUBRIC describing what a good output looks like. Grade the OUTPUT strictly by
+the RUBRIC.
+
+Return ONLY a JSON object on a single line with exactly these fields:
+  "score":     number in [0, 5]  (can be fractional, e.g. 3.5)
+  "rationale": string (1-3 sentences explaining the score)
+
+Do not include any other text.
+
+-----
+PROMPT:
+{{prompt}}
+-----
+OUTPUT:
+{{output}}
+-----
+RUBRIC:
+{{rubric}}
+-----
+```
+
+This is good enough for most evaluations. Override it when you want to inject project-specific scoring conventions, change the JSON contract for downstream parsing, or experiment with prompt-engineering improvements to the judge itself.
+
+### Override via `eval-bench.yaml`
+
+```yaml
+judge:
+  provider: ollama
+  model: qwen2.5:14b
+  endpoint: http://localhost:11434
+  template: |
+    You evaluate Cennso documentation answers. Grade the OUTPUT strictly by the RUBRIC.
+    Penalize fabricated CRD names. Treat doc citations as required, not optional.
+
+    Return ONLY one JSON line: {"score": N, "rationale": "..."}
+
+    -----
+    PROMPT:
+    {{prompt}}
+    -----
+    OUTPUT:
+    {{output}}
+    -----
+    RUBRIC:
+    {{rubric}}
+    -----
+```
+
+### Override via CLI (one-off)
+
+```bash
+eb run --baseline-from v1-baseline --save-as wip --judge-template ./my-judge-prompt.txt
+eb eval --ref HEAD --save-as wip --judge-template ./my-judge-prompt.txt
+```
+
+The CLI flag wins if both are set — useful when iterating on a new template without committing it to the YAML.
+
+### Rules
+
+- **Three placeholders are required:** `{{prompt}}`, `{{output}}`, `{{rubric}}`. eval-bench validates this at config-load time and again when `--judge-template` is read; a template missing any of them is rejected before any judge call fires (no half-run with all-zero scores).
+- **The JSON contract is the parser's contract, not the template's.** Whatever you write, the judge's *response* must still be a JSON object containing `"score"` (number 0–5) and `"rationale"` (string). Templates that drop those keys break score parsing — the snapshot will record judge errors.
+- **No other variables are interpolated.** `{{prompt}}`, `{{output}}`, `{{rubric}}` are it. Anything else is passed through verbatim, including stray `{{foo}}` you might write by mistake.
+
 ## Ollama (local, default for `ef init`)
 
 ```yaml

@@ -12,6 +12,7 @@ export interface OpenAICompatibleJudgeOptions {
   prompt: string;
   output: string;
   rubric: string;
+  template?: string | null;
   debug?: DebugLogger;
 }
 

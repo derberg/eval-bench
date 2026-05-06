@@ -20,7 +20,7 @@
 
 **Sample** — one execution of one prompt against one variant. `samples: 3` means each prompt is run 3 times per variant so we can measure variance (noise) in the judge scoring.
 
-**Judge** — an LLM that reads the prompt, the output, and the rubric, and returns a score 0–5 plus a rationale. Supported providers: `ollama`, `anthropic`, `openai`, `openai-compatible`. Swap the judge in `eval-bench.yaml` and re-run with `eb run --rejudge --save-as <name>` to re-score every cached Claude output with the new judge — no Claude invocations.
+**Judge** — an LLM that reads the prompt, the output, and the rubric, and returns a score 0–5 plus a rationale. Supported providers: `ollama`, `anthropic`, `openai`, `openai-compatible`, `openrouter`, `github-models`, `claude-cli`. Swap the judge in `eval-bench.yaml` and re-run with `eb run --rejudge --save-as <name>` to re-score every cached Claude output with the new judge — no Claude invocations. The wrapping prompt sent to the judge is overridable via `judge.template` in the config or `--judge-template <path>` on the CLI; see [judges.md](judges.md#customizing-the-judge-prompt) for the default and the placeholder contract.
 
 **Rubric** — per-prompt grading criteria. Write a specific, checklist-style rubric; vague rubrics produce noisy judge scores. See [rubrics.md](rubrics.md).
 

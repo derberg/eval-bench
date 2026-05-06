@@ -23,6 +23,9 @@ export interface JudgeConfig {
   apiKeyEnv: string | null;
   temperature: number;
   maxTokens: number;
+  // null = DEFAULT_TEMPLATE in rubric.ts. Set via judge.template in
+  // eval-bench.yaml or --judge-template <path> on the CLI.
+  template: string | null;
 }
 
 export type JudgeResult = Omit<Judgment, 'runId'> & {
@@ -48,6 +51,9 @@ export async function judge(
   const apiKey = apiKeyEnv ? (process.env[apiKeyEnv] ?? null) : null;
   let res: { score: number; rationale: string; raw: string };
   let timings: OllamaStreamSummary | null = null;
+  // Single source of truth for the optional prompt-template override —
+  // every backend forwards this to buildJudgePrompt unchanged.
+  const template = cfg.template;
   switch (cfg.provider) {
     case 'ollama':
       if (!cfg.endpoint) throw new Error('ollama: endpoint required');
@@ -58,6 +64,7 @@ export async function judge(
           temperature: cfg.temperature,
           maxTokens: cfg.maxTokens,
           debug,
+          template,
           ...input,
         });
         res = r;
@@ -73,6 +80,7 @@ export async function judge(
         temperature: cfg.temperature,
         maxTokens: cfg.maxTokens,
         debug,
+        template,
         ...input,
       });
       break;
@@ -85,6 +93,7 @@ export async function judge(
         temperature: cfg.temperature,
         maxTokens: cfg.maxTokens,
         debug,
+        template,
         ...input,
       });
       break;
@@ -97,6 +106,7 @@ export async function judge(
         temperature: cfg.temperature,
         maxTokens: cfg.maxTokens,
         debug,
+        template,
         ...input,
       });
       break;
@@ -109,6 +119,7 @@ export async function judge(
         temperature: cfg.temperature,
         maxTokens: cfg.maxTokens,
         debug,
+        template,
         ...input,
       });
       break;
@@ -121,12 +132,14 @@ export async function judge(
         temperature: cfg.temperature,
         maxTokens: cfg.maxTokens,
         debug,
+        template,
         ...input,
       });
       break;
     case 'claude-cli':
       res = await judgeWithClaudeCli({
         model: cfg.model,
+        template,
         ...input,
       });
       break;
@@ -151,5 +164,6 @@ export function judgeConfigFromConfig(cfg: Config): JudgeConfig {
     apiKeyEnv: cfg.judge.apiKeyEnv,
     temperature: cfg.judge.temperature,
     maxTokens: cfg.judge.maxTokens,
+    template: cfg.judge.template,
   };
 }

@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { parse } from 'yaml';
 import { z } from 'zod';
 import type { Config } from './types.js';
+import { validateJudgeTemplate } from './judges/rubric.js';
 
 const ConfigSchema = z
   .object({
@@ -39,6 +40,7 @@ const ConfigSchema = z
       apiKeyEnv: z.string().nullable().default(null),
       temperature: z.number().default(0),
       maxTokens: z.number().int().positive().default(1024),
+      template: z.string().nullable().default(null),
     }),
     runs: z
       .object({
@@ -62,6 +64,17 @@ const ConfigSchema = z
         path: ['judge', 'endpoint'],
         message: `judge.endpoint is required when judge.provider is "${cfg.judge.provider}"`,
       });
+    }
+    if (cfg.judge.template !== null) {
+      try {
+        validateJudgeTemplate(cfg.judge.template);
+      } catch (e) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['judge', 'template'],
+          message: (e as Error).message,
+        });
+      }
     }
   });
 

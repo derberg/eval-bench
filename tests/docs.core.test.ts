@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { DEFAULT_TEMPLATE } from '../src/judges/rubric.js';
 
 describe('core docs', () => {
   it('quickstart covers install, init, run, compare', () => {
@@ -49,6 +50,18 @@ describe('core docs', () => {
     ]) {
       expect(j).toContain(p);
     }
+  });
+  it('judges.md embeds the verbatim DEFAULT_TEMPLATE so users know what they are overriding', () => {
+    // The user-facing contract is "the docs show you the exact default".
+    // If DEFAULT_TEMPLATE ever changes, this test forces a docs update at
+    // the same time so the two never silently drift.
+    const j = readFileSync('docs/judges.md', 'utf8');
+    expect(j).toContain(DEFAULT_TEMPLATE.trim());
+    // Also pin that the docs explain the override paths and the placeholder
+    // contract — these are the actionable parts users need to find.
+    expect(j).toMatch(/judge:\s*\n\s*provider: ollama[\s\S]+template: \|/);
+    expect(j).toMatch(/--judge-template/);
+    expect(j).toMatch(/\{\{prompt\}\}.*\{\{output\}\}.*\{\{rubric\}\}/s);
   });
   it('ci.md has a complete GitHub Actions example', () => {
     const c = readFileSync('docs/ci.md', 'utf8');

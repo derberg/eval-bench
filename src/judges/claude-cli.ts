@@ -10,12 +10,18 @@ export interface ClaudeCliJudgeOptions {
   prompt: string;
   output: string;
   rubric: string;
+  template?: string | null;
 }
 
 export async function judgeWithClaudeCli(
   opts: ClaudeCliJudgeOptions,
 ): Promise<ParsedJudgment & { raw: string }> {
-  const judgePrompt = buildJudgePrompt(opts);
+  const judgePrompt = buildJudgePrompt({
+    prompt: opts.prompt,
+    output: opts.output,
+    rubric: opts.rubric,
+    template: opts.template,
+  });
   const args = [...(opts.extraArgs ?? []), '-p', judgePrompt];
   if (opts.model) {
     args.push('--model', opts.model);

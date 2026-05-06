@@ -22,6 +22,7 @@ export interface OllamaJudgeOptions {
   prompt: string;
   output: string;
   rubric: string;
+  template?: string | null;
   debug?: DebugLogger;
 }
 

@@ -64,7 +64,10 @@ judge:
   apiKeyEnv: ANTHROPIC_API_KEY           # env var holding API key (default per provider)
   temperature: 0
   maxTokens: 1024
+  template: null                         # optional: override the wrapping judge prompt
 ```
+
+`template` overrides the wrapping prompt sent around every `{prompt, output, rubric}` triple. Default is `null` (use the built-in template, see [judges.md](judges.md#customizing-the-judge-prompt) for the verbatim text). When set, the value must contain the placeholders `{{prompt}}`, `{{output}}`, `{{rubric}}` — eval-bench validates this at config-load time. Same effect as `--judge-template <path>` on the CLI; the CLI flag wins when both are set.
 
 Defaults for `apiKeyEnv`:
 - `ollama` → none (no auth)
