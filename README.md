@@ -117,7 +117,7 @@ eb view wip
 
 ### Workflow B.1 — iterate on one prompt or rubric
 
-Use this when one of your committed prompts regressed (or never scored well) and you want a tight fix-and-rerun loop on just that prompt — without paying for the full matrix on every iteration. Pair `--only` with `--no-save` so iterating doesn't pile up snapshot directories:
+Use this when one of your committed prompts regressed (or never scored well) and you want a tight fix-and-rerun loop on just that prompt — without paying for the full matrix on every iteration. Pair `--only` with `--no-save` so iterating doesn't pile up directories under your configured `snapshots.dir`:
 
 ```mermaid
 sequenceDiagram
@@ -127,6 +127,7 @@ sequenceDiagram
     participant prev as v1-baseline<br/>(snapshot)
     participant claude as claude CLI
     participant judge as Judge
+    participant tmp as tempdir<br/>(/tmp/eb-ephemeral-…)
 
     You->>prompts: edit one prompt + rubric
     You->>eb: eb run --baseline-from v1-baseline --only id --no-save
@@ -135,25 +136,26 @@ sequenceDiagram
     eb->>prev: load cached baseline runs for id (one per sample)
     prev-->>eb: cached runs + judgments
 
-    Note over eb: --no-save: snapshots dir → tempdir, rm -rf'd on exit
+    Note over eb,tmp: --no-save reroutes snapshots dir to a fresh tempdir<br/>(your configured snapshots.dir stays untouched)
     loop samples
         eb->>claude: spawn `claude -p <prompt>` (working-tree plugin)
         claude-->>eb: stdout
         eb->>judge: prompt + output + rubric
         judge-->>eb: score + rationale
     end
-    eb-->>You: per-row score + rationale to stdout
+    eb->>tmp: write snapshot.json + view.html + per-row outputs
+    eb-->>You: per-row score + rationale to stdout<br/>+ "View HTML" / "View CLI" copy-paste hints
 
-    Note over You: Read rationale.<br/>Skill bad? → fix skill / agent / hook.<br/>Rubric off? → edit prompts.yaml.
+    Note over You: Read rationale or open view.html.<br/>Skill bad? → fix skill / agent / hook.<br/>Rubric off? → edit prompts.yaml.
     You->>eb: same command, again
-    Note over eb: Fresh tempdir, no snapshot accumulates
+    Note over eb,tmp: Fresh tempdir per run; OS reclaims /tmp on reboot.
 ```
 
 ```bash
 eb run --baseline-from v1-baseline --only find-user-by-email --no-save
 ```
 
-The judge's per-row score + rationale prints to stdout so you can read *why* a row scored what it did without opening the HTML view. When you're happy, run once with `--save-as <name>` to capture the new state for workflow A.
+Each row's score + rationale prints to stdout so you can read *why* a row scored what it did without opening the HTML. To see the actual model output, open the `view.html` path the CLI prints at the end (or paste the `eb view <name> --snapshot-dir <tempdir>` line). When you're happy, run once with `--save-as <name>` to capture the new state for workflow A.
 
 ### Workflow B.2 — throwaway rubric, no commit
 
@@ -175,14 +177,14 @@ sequenceDiagram
     eb->>tty: Step 3/3 · rubric (with example template)
     You->>tty: type rubric, then "."
 
-    Note over eb: Current-side only, no baseline, no snapshot saved
+    Note over eb: Current-side only, no baseline.<br/>Snapshot lands in a tempdir; configured snapshots.dir is untouched.
     loop samples
         eb->>claude: spawn `claude -p <prompt>` (working-tree plugin)
         claude-->>eb: stdout
         eb->>judge: prompt + output + rubric
         judge-->>eb: score + rationale
     end
-    eb-->>You: score + rationale to stdout
+    eb-->>You: score + rationale to stdout<br/>+ tempdir path / view.html path / view CLI hint
 
     Note over You: Tweak skill or rubric.<br/>Up-arrow → run again.
 ```
@@ -191,7 +193,7 @@ sequenceDiagram
 eb run --prompt-inline
 ```
 
-The interactive flow shows a working rubric template inline (sub-criteria with point caps, plus a penalty line) so you don't have to read `docs/rubrics.md` before sketching one.
+The interactive flow shows a working rubric template inline (sub-criteria with point caps, plus a penalty line) so you don't have to read `docs/rubrics.md` before sketching one. After the run, the CLI prints the path to `view.html` and an `eb view --snapshot-dir <tempdir>` form so you can inspect the actual model outputs, not just the judge's summary.
 
 ### Other recipes
 
