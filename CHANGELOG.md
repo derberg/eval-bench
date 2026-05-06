@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.14.1 — 2026-05-06
+
+**Fixes:**
+
+- **Better help text for `--judge-template`.** Pre-fix the help line read `Reads <path>; must contain {{prompt}}, {{output}}, {{rubric}}.` — circular and unhelpful (no statement that `<path>` means a file on disk, no example). Now reads `Path to a plain-text file whose contents replace the default judge prompt template … Example: --judge-template ./my-judge.txt`. Renamed the placeholder from `<path>` to `<file>` for the same reason. Pure docs/UX fix; behavior unchanged.
+
 ## 0.14.0 — 2026-05-06
 
 **Features:**
