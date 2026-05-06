@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.12.2 — 2026-05-06
+
+**Polish:**
+
+- **`--prompt-inline` got a visual redesign.** The interactive flow now shows a banner (`✦ eval-bench · inline prompt`), numbered phase headers (`Step 1/3 · prompt id`, `Step 2/3 · prompt body`, `Step 3/3 · rubric`), green `✓` confirmations after each captured field with a line count, a cyan `›` input arrow, dim hints, gray example blocks for the rubric template, and a `▶ running …` transition before the matrix executes. Errors now read `✗ <reason>` in red. Pure presentation — same `.`-terminator, same validation rules, same returned `PromptSpec`. Existing tests pin the strings substring-style and continue to pass; one regex was relaxed to case-insensitive so the prompt-body hint can be capitalized as a proper sentence.
+
 ## 0.12.1 — 2026-05-06
 
 **Fixes:**

@@ -97,8 +97,9 @@ describe('readInlinePrompt', () => {
     expect(rubricPrompt).toMatch(/Accuracy/);
     expect(rubricPrompt).toMatch(/Penalty:/);
     // Also assert the prompt-body hint exists so it doesn't silently regress
-    // either.
-    expect(written()).toMatch(/what a real user would send to claude/);
+    // either. Case-insensitive: the test pins the hint's presence, not the
+    // exact wording — UI polish is allowed to capitalize the sentence.
+    expect(written()).toMatch(/what a real user would send to claude/i);
   });
 
   it('rejects non-TTY input so piped or redirected stdin produces a clear error', async () => {
