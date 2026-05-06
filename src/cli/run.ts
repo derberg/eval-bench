@@ -7,7 +7,7 @@ import { compareSnapshots, formatComparisonMarkdown } from '../compare.js';
 import { info, ok, warn, err, progress, step, judgeResult } from '../logger.js';
 import { initDebug, noopDebug, type DebugLogger } from '../debug.js';
 import { readInlinePrompt } from './prompt-inline.js';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { validateJudgeTemplate } from '../judges/rubric.js';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -47,12 +47,11 @@ function applyOverrides(cfg: Config, opts: RunOptions): Config {
     if (rest.length) cfg.judge.model = rest.join(':');
   }
   if (opts.judgeTemplate) {
-    // Read the file synchronously here so the rest of the run loads from
-    // an in-memory string. Validate up front — invalid templates fail
-    // before any judge call instead of producing all-zero scored rows.
-    const tmpl = readFileSync(opts.judgeTemplate, 'utf8');
-    validateJudgeTemplate(tmpl);
-    cfg.judge.template = tmpl;
+    // The CLI passes the template body directly (heredoc / $(cat file) /
+    // a literal). Validate up front so invalid templates fail before any
+    // judge call instead of producing all-zero scored rows.
+    validateJudgeTemplate(opts.judgeTemplate);
+    cfg.judge.template = opts.judgeTemplate;
   }
   if (opts.plugin) {
     cfg.plugin.path = opts.plugin;

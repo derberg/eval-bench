@@ -4,7 +4,6 @@ import { runBenchmark } from '../run.js';
 import { saveSnapshot, loadSnapshot, pruneFailedRuns } from '../snapshot.js';
 import { resolveSha } from '../swap.js';
 import { info, ok, warn, err, progress, step, judgeResult } from '../logger.js';
-import { readFileSync } from 'node:fs';
 import { validateJudgeTemplate } from '../judges/rubric.js';
 import { initDebug, noopDebug, type DebugLogger } from '../debug.js';
 import type { Config, Snapshot } from '../types.js';
@@ -32,9 +31,8 @@ function applyOverrides(cfg: Config, opts: EvalOptions): Config {
     if (rest.length) cfg.judge.model = rest.join(':');
   }
   if (opts.judgeTemplate) {
-    const tmpl = readFileSync(opts.judgeTemplate, 'utf8');
-    validateJudgeTemplate(tmpl);
-    cfg.judge.template = tmpl;
+    validateJudgeTemplate(opts.judgeTemplate);
+    cfg.judge.template = opts.judgeTemplate;
   }
   if (opts.plugin) {
     cfg.plugin.path = opts.plugin;

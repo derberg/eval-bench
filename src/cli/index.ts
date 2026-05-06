@@ -39,8 +39,8 @@ program
   )
   .option('--judge <spec>', 'Override judge, e.g. ollama:qwen2.5:14b')
   .option(
-    '--judge-template <file>',
-    'Path to a plain-text file whose contents replace the default judge prompt template (the wrapping instructions sent around every prompt+output+rubric the judge sees). The file must include the placeholders {{prompt}}, {{output}}, and {{rubric}} somewhere in its body. Example: --judge-template ./my-judge.txt',
+    '--judge-template <template>',
+    'Inline judge prompt template — replaces the default wrapping instructions sent around every prompt+output+rubric. Must contain the placeholders {{prompt}}, {{output}}, and {{rubric}}. For multi-line, use a heredoc or shell substitution: --judge-template "$(cat my-judge.txt)"',
   )
   .option('--save-as <name>', 'Save snapshot under this name')
   .option(
@@ -102,8 +102,8 @@ program
   .option('--config <file>', 'Config file', './.eval-bench/eval-bench.yaml')
   .option('--judge <spec>', 'Override judge, e.g. ollama:qwen2.5:14b')
   .option(
-    '--judge-template <file>',
-    'Path to a plain-text file whose contents replace the default judge prompt template (the wrapping instructions sent around every prompt+output+rubric the judge sees). The file must include the placeholders {{prompt}}, {{output}}, and {{rubric}} somewhere in its body. Example: --judge-template ./my-judge.txt',
+    '--judge-template <template>',
+    'Inline judge prompt template — replaces the default wrapping instructions sent around every prompt+output+rubric. Must contain the placeholders {{prompt}}, {{output}}, and {{rubric}}. For multi-line, use a heredoc or shell substitution: --judge-template "$(cat my-judge.txt)"',
   )
   .option('--force', 'Overwrite an existing complete snapshot with the same name')
   .option('--retry-failed', 'Re-run only failed rows in the existing snapshot (preserves successes)')

@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.15.0 — 2026-05-06
+
+**Breaking:**
+
+- **`--judge-template` now takes the template body inline, not a path to a file.** 0.14.x read `--judge-template <path>` as a filename and `readFileSync`'d the contents, which added a step the user didn't ask for. The flag now takes the template string directly: `--judge-template '...prompt body...'`. For multi-line bodies use shell substitution (`--judge-template "$(cat my-judge.txt)"`) or a heredoc — standard Unix idioms, no special handling needed in the tool. Existing `judge.template` in `eval-bench.yaml` is unchanged. Migration: any 0.14.x command that used `--judge-template ./file.txt` becomes `--judge-template "$(cat ./file.txt)"`.
+
 ## 0.14.1 — 2026-05-06
 
 **Fixes:**

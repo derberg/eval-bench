@@ -79,12 +79,34 @@ judge:
 
 ### Override via CLI (one-off)
 
+The flag takes the template body inline. For multi-line content use shell substitution from a file or a heredoc:
+
 ```bash
-eb run --baseline-from v1-baseline --save-as wip --judge-template ./my-judge-prompt.txt
-eb eval --ref HEAD --save-as wip --judge-template ./my-judge-prompt.txt
+# inline single-line
+eb run --baseline-from v1-baseline --save-as wip \
+  --judge-template 'Grade {{output}} against {{rubric}} for {{prompt}}. Return {"score":N,"rationale":"..."}'
+
+# from a file via $(cat ...)
+eb run --baseline-from v1-baseline --save-as wip \
+  --judge-template "$(cat my-judge-prompt.txt)"
+
+# heredoc inline
+eb eval --ref HEAD --save-as wip --judge-template "$(cat <<'EOF'
+You are a strict reviewer. Grade the OUTPUT by the RUBRIC; penalize fabricated CRD names.
+
+PROMPT:
+{{prompt}}
+OUTPUT:
+{{output}}
+RUBRIC:
+{{rubric}}
+
+Return {"score":N,"rationale":"..."}
+EOF
+)"
 ```
 
-The CLI flag wins if both are set — useful when iterating on a new template without committing it to the YAML.
+The CLI flag wins if both `--judge-template` and `judge.template` are set — useful when iterating on a new template without committing it to the YAML.
 
 ### Rules
 

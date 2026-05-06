@@ -64,11 +64,9 @@ describe('--judge-template / judge.template', () => {
     judgeBodies.length = 0;
   });
 
-  it('--judge-template <path> overrides the default template — the custom marker shows up in the judge HTTP body', async () => {
+  it('--judge-template <template> overrides the default template inline — the custom marker shows up in the judge HTTP body', async () => {
     judgeBodies.length = 0;
     const repo = await makeRepo();
-    const tmplPath = join(repo, 'judge.tmpl');
-    writeFileSync(tmplPath, CUSTOM_TEMPLATE_BODY);
 
     const { exitCode } = await execa(
       'npx',
@@ -79,7 +77,7 @@ describe('--judge-template / judge.template', () => {
         '--save-as',
         's1',
         '--judge-template',
-        tmplPath,
+        CUSTOM_TEMPLATE_BODY,
         ...sharedArgs,
       ],
       { cwd: repo, reject: false },
@@ -120,16 +118,13 @@ describe('--judge-template / judge.template', () => {
   it('--judge-template overrides judge.template in the config', async () => {
     judgeBodies.length = 0;
     const repo = await makeRepo();
-    // Config has YAML-CONFIG marker; CLI flag points at a file with a CLI-FLAG marker.
+    // Config has YAML-CONFIG marker; CLI flag passes a CLI-FLAG marker inline.
     writeFileSync(
       join(repo, 'eval-bench.yaml'),
       `plugin:\n  path: ./\nprovider:\n  command: node\n  extraArgs: ['${resolve('tests/fixtures/fake-claude.js')}']\n  timeout: 10\njudge:\n  provider: ollama\n  model: q\n  endpoint: ${judgeUrl}\n  template: |\n    YAML-CONFIG marker.\n    PROMPT={{prompt}}\n    OUTPUT={{output}}\n    RUBRIC={{rubric}}\nruns:\n  samples: 1\n  parallel: 1\nsnapshots:\n  dir: ./snaps\n`,
     );
-    const tmplPath = join(repo, 'cli.tmpl');
-    writeFileSync(
-      tmplPath,
-      'CLI-FLAG marker.\nPROMPT={{prompt}}\nOUTPUT={{output}}\nRUBRIC={{rubric}}',
-    );
+    const cliTemplate =
+      'CLI-FLAG marker.\nPROMPT={{prompt}}\nOUTPUT={{output}}\nRUBRIC={{rubric}}';
     const { exitCode } = await execa(
       'npx',
       [
@@ -139,7 +134,7 @@ describe('--judge-template / judge.template', () => {
         '--save-as',
         's3',
         '--judge-template',
-        tmplPath,
+        cliTemplate,
         ...sharedArgs,
       ],
       { cwd: repo, reject: false },
@@ -154,9 +149,8 @@ describe('--judge-template / judge.template', () => {
   it('rejects a template missing required placeholders before any judge call', async () => {
     judgeBodies.length = 0;
     const repo = await makeRepo();
-    const tmplPath = join(repo, 'broken.tmpl');
     // Missing {{output}} and {{rubric}}.
-    writeFileSync(tmplPath, 'just {{prompt}} and nothing else');
+    const broken = 'just {{prompt}} and nothing else';
     const { exitCode, stdout, stderr } = await execa(
       'npx',
       [
@@ -166,7 +160,7 @@ describe('--judge-template / judge.template', () => {
         '--save-as',
         's4',
         '--judge-template',
-        tmplPath,
+        broken,
         ...sharedArgs,
       ],
       { cwd: repo, reject: false },
