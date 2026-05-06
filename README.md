@@ -214,11 +214,18 @@ eb run --baseline main --save-as baseline --retry-failed
 # without re-running Claude — answers "did the new judge change the verdict?"
 eb run --save-as wip --rejudge
 
+# override the wrapping judge prompt for one run — useful for prompt-engineering
+# the judge itself before committing to a new template in eval-bench.yaml
+eb run --save-as wip --judge-template "$(cat my-judge.txt)"
+# (or persist it: set judge.template in .eval-bench/eval-bench.yaml)
+
 # diagnose a slow / stuck judge — writes a per-invocation debug log under
 # .eval-bench/snapshots/<name>/debug-<ts>.log with full HTTP bodies and
 # Ollama timing fields, plus a colorized stderr mirror
 eb run --baseline main --save-as baseline --debug
 ```
+
+See [docs/judges.md#customizing-the-judge-prompt](docs/judges.md#customizing-the-judge-prompt) for the verbatim default judge template, the placeholder rules, and worked examples.
 
 Full walkthrough: [docs/quickstart.md](docs/quickstart.md).
 
