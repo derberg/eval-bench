@@ -76,6 +76,31 @@ describe('readInlinePrompt', () => {
     expect(written()).toMatch(/prompt body cannot be empty/);
   });
 
+  it('shows an example rubric inline so the user does not have to dig through docs to know what shape to type', async () => {
+    const { input, output, written } = ttyPair();
+    const result = readInlinePrompt(input, output);
+    await new Promise((r) => setImmediate(r));
+    input.write('id\n');
+    input.write('a prompt\n');
+    input.write('.\n');
+    // At this point the rubric prompt has been printed. Capture it before
+    // sending the rubric so we're asserting on the prompt's output, not the
+    // user's typed input.
+    const rubricPrompt = written();
+    input.write('a rubric\n');
+    input.write('.\n');
+    await result;
+    // Pre-fix output was just "Rubric — finish with a line containing only \".\"
+    // :", which forced new users to read prompts.yaml or docs to know what a
+    // rubric looks like. The hint must include a working scoring template.
+    expect(rubricPrompt).toMatch(/Score 0-5 on:/);
+    expect(rubricPrompt).toMatch(/Accuracy/);
+    expect(rubricPrompt).toMatch(/Penalty:/);
+    // Also assert the prompt-body hint exists so it doesn't silently regress
+    // either.
+    expect(written()).toMatch(/what a real user would send to claude/);
+  });
+
   it('rejects non-TTY input so piped or redirected stdin produces a clear error', async () => {
     const input = new PassThrough() as PassThrough & { isTTY?: boolean };
     input.isTTY = false;

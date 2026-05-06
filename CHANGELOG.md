@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.12.1 — 2026-05-06
+
+**Fixes:**
+
+- **`--prompt-inline` now shows what a rubric looks like inline.** Pre-fix, the interactive flow asked `Rubric — finish with a line containing only "." :` and stopped — a new user had no idea what to type without going to read `prompts.yaml` or `docs/rubrics.md` first. The rubric prompt now includes a one-line "what / why / when" hint plus a working scoring template (sub-criteria with point caps, plus a penalty line) the user can imitate. The prompt-body prompt similarly gains a one-liner clarifying that the body is what a real user would send to claude (not where to put the rubric). No behavioral change to the matrix, and the `.` terminator and validation rules are unchanged.
+
 ## 0.12.0 — 2026-05-06
 
 **Features:**

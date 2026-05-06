@@ -51,7 +51,9 @@ export function readInlinePrompt(
         }
         id = candidate;
         phase = 'prompt';
-        output.write('Prompt body — finish with a line containing only "." :\n');
+        output.write('\nPrompt body — what a real user would send to claude.\n');
+        output.write('Multi-line is fine. Don\'t include the rubric here.\n');
+        output.write('Finish with a line containing only "." :\n');
         return;
       }
       if (phase === 'prompt') {
@@ -61,7 +63,17 @@ export function readInlinePrompt(
             return;
           }
           phase = 'rubric';
-          output.write('Rubric — finish with a line containing only "." :\n');
+          output.write('\nRubric — tells the judge how to score the answer 0–5.\n');
+          output.write('Be specific: name sub-criteria, cap each, list penalties.\n');
+          output.write('Vague rubrics produce noisy judges. Example:\n');
+          output.write('\n');
+          output.write('    Score 0-5 on:\n');
+          output.write('    - Accuracy (0-3): correctly identifies X, grounded in docs\n');
+          output.write('    - Sourcing  (0-1): cites specific doc pages, not generic links\n');
+          output.write('    - Format    (0-1): clean structure, no filler\n');
+          output.write('    Penalty: -2 if any component name or API is fabricated.\n');
+          output.write('\n');
+          output.write('Finish with a line containing only "." :\n');
           return;
         }
         promptLines.push(line);
