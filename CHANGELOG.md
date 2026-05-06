@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.12.3 — 2026-05-06
+
+**Docs:**
+
+- **README Quickstart restructured into named workflows with sequence diagrams.** The previous wall of bash recipes is now broken into Workflow A (rolling baseline — the common case), Workflow B.1 (iterate on one prompt with `--only --no-save`), Workflow B.2 (throwaway rubric via `--prompt-inline`), and Other recipes (CI gating, stitching, retry-failed, rejudge, debug). Each workflow has a Mermaid sequence diagram showing the actual dataflow — what's cached vs what runs, where claude/judge calls happen, what prints to stdout — so a newcomer can pick the right command without reading the full docs first. Pure docs change; no code or behavior touched.
+
 ## 0.12.2 — 2026-05-06
 
 **Polish:**

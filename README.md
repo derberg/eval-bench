@@ -65,16 +65,140 @@ eb init
 # write your eval prompts and rubrics
 $EDITOR .eval-bench/prompts.yaml
 
-# freeze a reference snapshot at v1.0.0 — runs the matrix once at one ref
+# freeze a reference snapshot at a known-good ref. This becomes the
+# starting point for the rolling-baseline workflow below.
 eb eval --ref v1.0.0 --save-as v1-baseline
+```
 
-# make changes to your plugin...
+From here you'll typically use one of three workflows. Pick by what you're trying to do.
 
-# diff your changes against the saved baseline; only the current side runs
-eb run --baseline-from v1-baseline --save-as wip --compare v1-baseline
+### Workflow A — rolling baseline (the common case)
 
-# narrow the matrix to one or a few prompts while iterating on a rubric
-eb run --baseline-from v1-baseline --save-as wip --only find-user-by-email
+You changed something in the plugin and want to know if it regressed quality vs the last accepted snapshot. The previous snapshot's `current` runs become this snapshot's `baseline` — zero claude calls and zero judge calls for that side, so you only pay for the current ref:
+
+```mermaid
+sequenceDiagram
+    actor You
+    participant tree as Plugin<br/>(working tree)
+    participant eb as eb CLI
+    participant prev as v1-baseline<br/>(snapshot)
+    participant claude as claude CLI
+    participant judge as Judge<br/>(Ollama / Anthropic / OpenAI)
+    participant snap as wip<br/>(snapshot)
+
+    You->>tree: edit your plugin
+    You->>eb: eb run --baseline-from v1-baseline --save-as wip
+
+    Note over eb,prev: The previous snapshot's "current" runs become<br/>this snapshot's "baseline". Zero claude calls,<br/>zero judge calls for that side.
+    eb->>prev: load cached runs + judgments
+    prev-->>eb: re-stamped as baseline rows
+
+    Note over eb,claude: Each "spawn" = a fresh `claude -p <prompt>` subprocess.<br/>It loads the plugin source from your working tree —<br/>uncommitted changes are included.
+    loop prompt × samples
+        eb->>claude: spawn `claude -p <prompt>`
+        claude-->>eb: stdout
+        eb->>judge: prompt + output + rubric
+        judge-->>eb: score + rationale
+    end
+
+    eb->>snap: write baseline + current + summary
+    eb-->>You: baseline mean 4.20 (n=15)<br/>current  mean 4.45 (n=15)<br/>Δ +0.25
+    You->>eb: eb view wip
+    eb-->>You: side-by-side HTML
+```
+
+```bash
+# Make a change in your plugin, then:
+eb run --baseline-from v1-baseline --save-as wip
+eb view wip
+```
+
+Δ is `current.mean − baseline.mean`. Scores are 0–5 from the judge; means are arithmetic averages across all (prompt × samples) runs. Once `wip` looks good, it becomes the next iteration's `--baseline-from` argument — there's no separate "promote" command.
+
+### Workflow B.1 — iterate on one prompt or rubric
+
+Use this when one of your committed prompts regressed (or never scored well) and you want a tight fix-and-rerun loop on just that prompt — without paying for the full matrix on every iteration. Pair `--only` with `--no-save` so iterating doesn't pile up snapshot directories:
+
+```mermaid
+sequenceDiagram
+    actor You
+    participant prompts as prompts.yaml
+    participant eb as eb CLI
+    participant prev as v1-baseline<br/>(snapshot)
+    participant claude as claude CLI
+    participant judge as Judge
+
+    You->>prompts: edit one prompt + rubric
+    You->>eb: eb run --baseline-from v1-baseline --only id --no-save
+
+    Note over eb,prev: --only filters cached baseline to just this prompt
+    eb->>prev: load cached baseline runs for id (one per sample)
+    prev-->>eb: cached runs + judgments
+
+    Note over eb: --no-save: snapshots dir → tempdir, rm -rf'd on exit
+    loop samples
+        eb->>claude: spawn `claude -p <prompt>` (working-tree plugin)
+        claude-->>eb: stdout
+        eb->>judge: prompt + output + rubric
+        judge-->>eb: score + rationale
+    end
+    eb-->>You: per-row score + rationale to stdout
+
+    Note over You: Read rationale.<br/>Skill bad? → fix skill / agent / hook.<br/>Rubric off? → edit prompts.yaml.
+    You->>eb: same command, again
+    Note over eb: Fresh tempdir, no snapshot accumulates
+```
+
+```bash
+eb run --baseline-from v1-baseline --only find-user-by-email --no-save
+```
+
+The judge's per-row score + rationale prints to stdout so you can read *why* a row scored what it did without opening the HTML view. When you're happy, run once with `--save-as <name>` to capture the new state for workflow A.
+
+### Workflow B.2 — throwaway rubric, no commit
+
+Use this when you want to try a prompt + rubric without committing it to `prompts.yaml` — exploring a new test path, sanity-checking whether your rubric actually scores answers the way you intended, or sketching before deciding what's worth keeping. `--prompt-inline` reads one prompt + rubric interactively from your terminal:
+
+```mermaid
+sequenceDiagram
+    actor You
+    participant tty as Terminal
+    participant eb as eb CLI
+    participant claude as claude CLI
+    participant judge as Judge
+
+    You->>eb: eb run --prompt-inline
+    eb->>tty: Step 1/3 · prompt id
+    You->>tty: kebab-case id (or enter for default)
+    eb->>tty: Step 2/3 · prompt body
+    You->>tty: paste prompt body, then "."
+    eb->>tty: Step 3/3 · rubric (with example template)
+    You->>tty: type rubric, then "."
+
+    Note over eb: Current-side only, no baseline, no snapshot saved
+    loop samples
+        eb->>claude: spawn `claude -p <prompt>` (working-tree plugin)
+        claude-->>eb: stdout
+        eb->>judge: prompt + output + rubric
+        judge-->>eb: score + rationale
+    end
+    eb-->>You: score + rationale to stdout
+
+    Note over You: Tweak skill or rubric.<br/>Up-arrow → run again.
+```
+
+```bash
+eb run --prompt-inline
+```
+
+The interactive flow shows a working rubric template inline (sub-criteria with point caps, plus a penalty line) so you don't have to read `docs/rubrics.md` before sketching one.
+
+### Other recipes
+
+```bash
+# CI gating — A/B two refs in one shot, fail if regression > threshold
+eb run --baseline-from v1-baseline --save-as wip \
+       --compare v1-baseline --fail-on-regression 0.5
 
 # already have an `eb eval` snapshot at HEAD? promote it to a dual-variant
 # snapshot by stitching it against the saved baseline — no fresh claude runs,
@@ -92,12 +216,7 @@ eb run --save-as wip --rejudge
 # .eval-bench/snapshots/<name>/debug-<ts>.log with full HTTP bodies and
 # Ollama timing fields, plus a colorized stderr mirror
 eb run --baseline main --save-as baseline --debug
-
-# side-by-side outputs in the browser
-eb view wip
 ```
-
-`eb eval` produces a single-variant snapshot (one ref). `eb run --baseline-from <name>` reuses it instead of regenerating the baseline side, so each iteration only pays for the current ref. The mirror `--current-from <name>` reuses a saved snapshot's runs for the *current* side instead — combine both to stitch two `eb eval` snapshots into one dual-variant snapshot with zero fresh runs (handy when you've already evaluated both sides and just want a `view`-able A/B). `--only <ids>` (comma-separated, repeatable) restricts the matrix to specific prompt ids — useful when iterating on one rubric. Plain `eb run --baseline <ref> --current <ref>` still works when you want to A/B two refs in one shot (CI gating).
 
 Full walkthrough: [docs/quickstart.md](docs/quickstart.md).
 
