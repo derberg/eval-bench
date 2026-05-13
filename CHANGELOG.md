@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.16.1 — 2026-05-13
+
+**Bug fixes:**
+
+- **`--output-format stream-json` now includes `--verbose`.** Claude CLI 2.1.x made `--verbose` required when combining `--print` with `stream-json` output format. Without it every run failed immediately with `"When using --print, --output-format=stream-json requires --verbose"`. Fixed by adding `--verbose` alongside the auto-injected `--output-format stream-json` args.
+
 ## 0.16.0 — 2026-05-13
 
 **Features:**

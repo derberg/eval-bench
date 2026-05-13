@@ -219,7 +219,8 @@ export async function invokeClaude(opts: InvokeClaudeOptions): Promise<InvokeCla
   const userSpecifiedFormat = opts.extraArgs.some(
     (a) => a === '--output-format' || a.startsWith('--output-format='),
   );
-  const formatArgs = userSpecifiedFormat ? [] : ['--output-format', 'stream-json'];
+  // --verbose is required by the Claude CLI when combining --print with stream-json
+  const formatArgs = userSpecifiedFormat ? [] : ['--output-format', 'stream-json', '--verbose'];
 
   try {
     const args = [...opts.extraArgs, ...formatArgs, '-p', opts.prompt];
