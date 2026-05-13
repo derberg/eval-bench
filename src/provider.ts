@@ -58,6 +58,7 @@ function parseStreamJson(stdout: string): {
 
   const toolCalls: ToolCall[] = [];
   let output: string | null = null;
+  let lastAssistantText: string | null = null;
   let usage: RunUsage | null = null;
 
   for (const line of lines) {
@@ -83,6 +84,9 @@ function parseStreamJson(stdout: string): {
                 : {},
           });
         }
+        if (b.type === 'text' && typeof b.text === 'string' && b.text.trim().length > 0) {
+          lastAssistantText = b.text;
+        }
       }
     }
 
@@ -102,6 +106,13 @@ function parseStreamJson(stdout: string): {
   }
 
   if (output === null || usage === null) return null;
+  // When the agent's last action is a tool call (e.g. a TodoWrite cleanup),
+  // the result event has an empty string even though the real answer was in
+  // the preceding assistant text block. Fall back to that text so the run
+  // isn't silently scored as zero.
+  if (output === '' && lastAssistantText !== null) {
+    output = lastAssistantText;
+  }
   return { output, usage, toolCalls };
 }
 

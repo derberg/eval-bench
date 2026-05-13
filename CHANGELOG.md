@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.16.2 — 2026-05-13
+
+**Bug fixes:**
+
+- **Recover non-empty output when the agent ends on a tool call.** When an agent writes its final answer and then makes a trailing tool call (e.g. a `TodoWrite` cleanup), the Claude CLI emits `result: ""` even though the real answer is in the preceding assistant text block. `parseStreamJson` now falls back to the last non-empty assistant text block in that case, preventing the run from being silently scored as zero by the judge.
+
 ## 0.16.1 — 2026-05-13
 
 **Bug fixes:**
