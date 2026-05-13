@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.16.3 — 2026-05-13
+
+**Bug fixes:**
+
+- **`--retry-failed` now re-runs Claude when a run exited cleanly with empty output.** When the agent ends on a trailing tool call, `run.output` is `""` and `judgment.error` is `"run failed"`. Previously the matrix classifier skipped that row (treating it as "run failed = permanent"), so `--retry-failed` printed "nothing to do". Now such rows are treated as `fresh` and Claude is re-invoked.
+
 ## 0.16.2 — 2026-05-13
 
 **Bug fixes:**

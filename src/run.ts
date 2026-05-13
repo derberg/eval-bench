@@ -427,6 +427,14 @@ export async function runBenchmark(opts: RunBenchmarkOptions): Promise<Snapshot>
       fresh.push(row);
     } else if (
       existingRun.error === null &&
+      existingRun.output.length === 0 &&
+      existingJudgment?.error === 'run failed'
+    ) {
+      // Run exited cleanly but produced empty output (e.g. agent ended on a
+      // trailing tool call). Re-invoke Claude rather than re-judging empty output.
+      fresh.push(row);
+    } else if (
+      existingRun.error === null &&
       existingRun.output.length > 0 &&
       (!existingJudgment ||
         (typeof existingJudgment.error === 'string' && existingJudgment.error !== 'run failed'))
