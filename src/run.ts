@@ -1,4 +1,6 @@
-import { resolve as resolvePath } from 'node:path';
+import { writeFile } from 'node:fs/promises';
+import { realpathSync } from 'node:fs';
+import { resolve as resolvePath, join, relative } from 'node:path';
 import { createHash } from 'node:crypto';
 import type {
   PromptSpec,
@@ -361,11 +363,27 @@ async function runAndJudge(
     durationMs: r.durationMs,
     error: r.error,
   });
+
+  for (const tc of r.toolCalls ?? []) {
+    debug.event('tool-call', { rowId: row.id, tool: tc.tool, input: JSON.stringify(tc.input) });
+  }
+
+  const canonicalCwd = r.cwd ?? cwd;
+  let transcriptFile: string | null = null;
+  if (r.rawTranscript && canonicalCwd) {
+    const tPath = join(canonicalCwd, 'transcript.jsonl');
+    await writeFile(tPath, r.rawTranscript);
+    const snapshotDir = realpathSync(resolvePath(opts.config.snapshots.dir, opts.name));
+    transcriptFile = relative(snapshotDir, tPath);
+  }
+
   debug.event('run-end', {
     rowId: row.id,
     exitCode: r.exitCode,
     durationMs: r.durationMs,
     outputBytes: r.output.length,
+    toolCallCount: r.toolCalls?.length ?? 0,
+    transcriptFile,
     ...(r.usage && {
       inputTokens: r.usage.inputTokens,
       outputTokens: r.usage.outputTokens,
@@ -382,9 +400,9 @@ async function runAndJudge(
     exitCode: r.exitCode,
     error: r.error,
     usage: r.usage,
-    // r.cwd is canonical (post-realpath); fall back to the templated value
-    // when realpath couldn't run (no cwd configured).
-    cwd: r.cwd ?? cwd,
+    cwd: canonicalCwd,
+    toolCalls: r.toolCalls,
+    transcriptFile,
   };
   const judgment = await judgeRun(row, run, judgeCfg, opts.onProgress, debug);
   return { run, judgment };

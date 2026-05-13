@@ -3,7 +3,7 @@ import { access, mkdir, realpath, writeFile, readdir, symlink } from 'node:fs/pr
 import { join, basename, relative } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
-import type { RunUsage } from './types.js';
+import type { RunUsage, ToolCall } from './types.js';
 import type { DebugLogger } from './debug.js';
 import { noopDebug } from './debug.js';
 
@@ -31,45 +31,78 @@ export interface InvokeClaudeResult {
   // macOS /var/folders → /private/var/folders is normalized). Null when no
   // cwd was configured.
   cwd: string | null;
-}
-
-interface ClaudeJsonResult {
-  result?: unknown;
-  total_cost_usd?: unknown;
-  usage?: {
-    input_tokens?: unknown;
-    output_tokens?: unknown;
-    cache_read_input_tokens?: unknown;
-    cache_creation_input_tokens?: unknown;
-  };
+  // Tool calls made during the run in order. Null when stdout wasn't stream-json.
+  toolCalls: ToolCall[] | null;
+  // Raw stream-json stdout for saving as transcript.jsonl. Null when stdout
+  // wasn't stream-json.
+  rawTranscript: string | null;
 }
 
 function num(x: unknown): number {
   return typeof x === 'number' && Number.isFinite(x) ? x : 0;
 }
 
-// Returns { output, usage } if stdout is a Claude `--output-format json`
-// payload; null if we should fall back to treating raw stdout as output.
-function parseClaudeJson(stdout: string): { output: string; usage: RunUsage } | null {
-  const trimmed = stdout.trim();
-  if (!trimmed.startsWith('{')) return null;
-  let parsed: ClaudeJsonResult;
-  try {
-    parsed = JSON.parse(trimmed) as ClaudeJsonResult;
-  } catch {
-    return null;
+// Parses Claude `--output-format stream-json` JSONL stdout.
+// Each line is a JSON event; extracts tool_use blocks from assistant messages
+// and the final result/usage from the result event.
+// Also handles `--output-format json` single-object output since it shares
+// the same {type:"result", result, usage} shape on a single line.
+// Returns null if no result event is found (plain-text provider output).
+function parseStreamJson(stdout: string): {
+  output: string;
+  usage: RunUsage;
+  toolCalls: ToolCall[];
+} | null {
+  const lines = stdout.split('\n').filter((l) => l.trim().length > 0);
+  if (lines.length === 0) return null;
+
+  const toolCalls: ToolCall[] = [];
+  let output: string | null = null;
+  let usage: RunUsage | null = null;
+
+  for (const line of lines) {
+    let ev: Record<string, unknown>;
+    try {
+      ev = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    if (typeof ev.type !== 'string') continue;
+
+    if (ev.type === 'assistant') {
+      const msg = ev.message as { content?: unknown[] } | undefined;
+      for (const block of msg?.content ?? []) {
+        if (!block || typeof block !== 'object') continue;
+        const b = block as Record<string, unknown>;
+        if (b.type === 'tool_use' && typeof b.name === 'string') {
+          toolCalls.push({
+            tool: b.name,
+            input:
+              typeof b.input === 'object' && b.input !== null
+                ? (b.input as Record<string, unknown>)
+                : {},
+          });
+        }
+      }
+    }
+
+    if (ev.type === 'result' && typeof ev.result === 'string') {
+      output = ev.result;
+      const u = ev.usage as Record<string, unknown> | undefined;
+      if (u) {
+        usage = {
+          inputTokens: num(u.input_tokens),
+          outputTokens: num(u.output_tokens),
+          cacheReadInputTokens: num(u.cache_read_input_tokens),
+          cacheCreationInputTokens: num(u.cache_creation_input_tokens),
+          totalCostUsd: num(ev.total_cost_usd),
+        };
+      }
+    }
   }
-  if (typeof parsed.result !== 'string' || !parsed.usage) return null;
-  return {
-    output: parsed.result,
-    usage: {
-      inputTokens: num(parsed.usage.input_tokens),
-      outputTokens: num(parsed.usage.output_tokens),
-      cacheReadInputTokens: num(parsed.usage.cache_read_input_tokens),
-      cacheCreationInputTokens: num(parsed.usage.cache_creation_input_tokens),
-      totalCostUsd: num(parsed.total_cost_usd),
-    },
-  };
+
+  if (output === null || usage === null) return null;
+  return { output, usage, toolCalls };
 }
 
 async function exists(path: string): Promise<boolean> {
@@ -180,13 +213,13 @@ export async function invokeClaude(opts: InvokeClaudeOptions): Promise<InvokeCla
   const tempSetup = await setupTempPlugin(opts.pluginDir);
   const effectivePluginDir = tempSetup?.tempDir ?? opts.pluginDir;
 
-  // Auto-inject `--output-format json` so we can capture token usage. If the
-  // user already specified an output format, respect their choice and accept
-  // that we won't get usage data from this run.
+  // Auto-inject `--output-format stream-json` so we can capture token usage
+  // and tool calls. If the user already specified an output format, respect
+  // their choice and accept that we won't get structured data from this run.
   const userSpecifiedFormat = opts.extraArgs.some(
     (a) => a === '--output-format' || a.startsWith('--output-format='),
   );
-  const formatArgs = userSpecifiedFormat ? [] : ['--output-format', 'json'];
+  const formatArgs = userSpecifiedFormat ? [] : ['--output-format', 'stream-json'];
 
   try {
     const args = [...opts.extraArgs, ...formatArgs, '-p', opts.prompt];
@@ -231,7 +264,7 @@ export async function invokeClaude(opts: InvokeClaudeOptions): Promise<InvokeCla
       });
       const durationMs = Date.now() - started;
       const rawStdout = result.stdout ?? '';
-      const parsed = parseClaudeJson(rawStdout);
+      const parsed = parseStreamJson(rawStdout);
       debug.event(
         'subprocess-res',
         {
@@ -241,6 +274,7 @@ export async function invokeClaude(opts: InvokeClaudeOptions): Promise<InvokeCla
           stderrBytes: (result.stderr ?? '').length,
           timedOut: Boolean(result.timedOut),
           parsedJson: Boolean(parsed),
+          toolCallCount: parsed?.toolCalls.length ?? 0,
         },
         rawStdout,
       );
@@ -248,6 +282,8 @@ export async function invokeClaude(opts: InvokeClaudeOptions): Promise<InvokeCla
         ? parsed.output
         : [rawStdout, result.stderr].filter(Boolean).join('\n');
       const usage = parsed?.usage ?? null;
+      const toolCalls = parsed?.toolCalls ?? null;
+      const rawTranscript = parsed ? rawStdout : null;
       if (result.timedOut) {
         return {
           output,
@@ -256,6 +292,8 @@ export async function invokeClaude(opts: InvokeClaudeOptions): Promise<InvokeCla
           error: 'timed out',
           usage,
           cwd: canonicalCwd,
+          toolCalls,
+          rawTranscript,
         };
       }
       if (result.exitCode !== 0) {
@@ -266,9 +304,11 @@ export async function invokeClaude(opts: InvokeClaudeOptions): Promise<InvokeCla
           error: result.stderr || 'non-zero exit',
           usage,
           cwd: canonicalCwd,
+          toolCalls,
+          rawTranscript,
         };
       }
-      return { output, exitCode: 0, durationMs, error: null, usage, cwd: canonicalCwd };
+      return { output, exitCode: 0, durationMs, error: null, usage, cwd: canonicalCwd, toolCalls, rawTranscript };
     } catch (err) {
       const durationMs = Date.now() - started;
       const msg = err instanceof Error ? err.message : String(err);
@@ -284,6 +324,8 @@ export async function invokeClaude(opts: InvokeClaudeOptions): Promise<InvokeCla
         error: msg,
         usage: null,
         cwd: canonicalCwd,
+        toolCalls: null,
+        rawTranscript: null,
       };
     }
   } finally {

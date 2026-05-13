@@ -63,6 +63,11 @@ export interface RunUsage {
   totalCostUsd: number;
 }
 
+export interface ToolCall {
+  tool: string;
+  input: Record<string, unknown>;
+}
+
 export interface RunResult {
   id: string;
   promptId: string;
@@ -78,6 +83,12 @@ export interface RunResult {
   // Resolved absolute working directory for this run. Null means the parent
   // process cwd was used (no provider.cwd configured).
   cwd: string | null;
+  // Tool calls made during the run, in order. Null when the provider didn't
+  // emit stream-json (e.g. custom command, older snapshots loaded from disk).
+  toolCalls: ToolCall[] | null;
+  // Absolute path to the JSONL conversation transcript for this run.
+  // Null when no cwd was configured or the provider didn't emit stream-json.
+  transcriptFile: string | null;
 }
 
 export interface TokenTotals {

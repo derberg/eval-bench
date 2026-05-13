@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.16.0 — 2026-05-13
+
+**Features:**
+
+- **Tool call capture and conversation transcripts.** Each run now records the MCP/tool calls the agent made, in order, directly in `snapshot.json` under `runs[].toolCalls` (`[{tool, input}]`). The full `--output-format stream-json` conversation is saved as `transcript.jsonl` inside the run's working directory; `runs[].transcriptFile` holds the path relative to the snapshot directory so it is portable across machines and committable to version control. When debugging a cost spike, an agent can read the snapshot, find the expensive run, inspect `toolCalls` to see which MCP searches fired and with what queries, and open `transcriptFile` for the full tool input/output trace — no guessing from token counts alone.
+- **`tool-call` debug events.** The debug log now emits a `[tool-call]` event for every tool invocation between `run-start` and `run-end`, with `tool` and `input` fields, so cost anomalies are visible in real time during a run.
+- **`toolCallCount` in `subprocess-res` and `run-end` debug events.** Quick tally without opening the transcript.
+
+**Internals:**
+
+- Provider now injects `--output-format stream-json` (was `--output-format json`). The parser handles both single-object and JSONL output, so existing fixtures and custom commands continue to work.
+
 ## 0.15.1 — 2026-05-06
 
 **Polish:**
