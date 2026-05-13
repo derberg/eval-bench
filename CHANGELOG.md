@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.16.4 — 2026-05-13
+
+**Bug fixes:**
+
+- **`--retry-failed` actually detects empty-output runs as failed.** `pruneFailedRuns` only considered runs with `error !== null` as failed, so a run that exited cleanly with `output: ""` and `judgment.error: "run failed"` was invisible to the prune step — `--retry-failed` printed "nothing to do" and returned early. Now `pruneFailedRuns` also flags runs where `output.length === 0` and the judgment error is `"run failed"`, so they are pruned from the resume bag and re-invoked by the matrix classifier.
+
 ## 0.16.3 — 2026-05-13
 
 **Bug fixes:**

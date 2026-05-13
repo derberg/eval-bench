@@ -48,7 +48,18 @@ export function pruneFailedRuns(snap: Snapshot): {
   prunedJudgments: number;
   prunedFailedJudgmentsOnly: number;
 } {
-  const failedRunIds = new Set(snap.runs.filter((r) => r.error !== null).map((r) => r.id));
+  const judgmentByRunId = new Map(snap.judgments.map((j) => [j.runId, j]));
+  const failedRunIds = new Set(
+    snap.runs
+      .filter((r) => {
+        if (r.error !== null) return true;
+        // Run exited cleanly but produced empty output (e.g. agent ended on a
+        // trailing tool call). The judge marks these as "run failed". Treat them
+        // as failed runs so --retry-failed re-invokes Claude instead of skipping.
+        return r.output.length === 0 && judgmentByRunId.get(r.id)?.error === 'run failed';
+      })
+      .map((r) => r.id),
+  );
   // Also drop genuine judge failures (run succeeded, judgment errored with a
   // real judge error like a parse failure or 5xx). The matrix dedup will
   // re-judge those rows on resume without re-invoking Claude. 'run failed'
