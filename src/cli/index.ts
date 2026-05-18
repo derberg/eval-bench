@@ -29,6 +29,7 @@ program
   .option('--prompts <file>', 'Prompts file', './.eval-bench/prompts.yaml')
   .option('--config <file>', 'Config file (default: .eval-bench/eval-bench.yaml)')
   .option('--samples <n>', 'Override samples-per-prompt', (v) => parseInt(v, 10))
+  .option('--timeout <s>', 'Override provider timeout in seconds', (v) => parseInt(v, 10))
   .option(
     '--only <ids>',
     'Run only these prompt ids (comma-separated, repeatable)',
@@ -72,6 +73,7 @@ program
       prompts: opts.prompts,
       config: opts.config,
       samples: opts.samples,
+      timeout: opts.timeout,
       only: opts.only,
       judge: opts.judge,
       judgeTemplate: opts.judgeTemplate,

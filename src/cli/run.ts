@@ -33,6 +33,7 @@ export interface RunOptions {
   force?: boolean;
   retryFailed?: boolean;
   rejudge?: boolean;
+  timeout?: number;
   promptInline?: boolean;
   noInteractive?: boolean;
   dryRun?: boolean;
@@ -41,6 +42,7 @@ export interface RunOptions {
 }
 
 function applyOverrides(cfg: Config, opts: RunOptions): Config {
+  if (opts.timeout) cfg.provider.timeout = opts.timeout;
   if (opts.samples) cfg.runs.samples = opts.samples;
   if (opts.judge) {
     const [provider, ...rest] = opts.judge.split(':');
