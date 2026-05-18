@@ -27,7 +27,7 @@ program
   .option('--current <ref>', 'Git ref for current')
   .option('--current-from <name>', 'Reuse current runs from a saved snapshot instead of regenerating them')
   .option('--prompts <file>', 'Prompts file', './.eval-bench/prompts.yaml')
-  .option('--config <file>', 'Config file', './.eval-bench/eval-bench.yaml')
+  .option('--config <file>', 'Config file (default: .eval-bench/eval-bench.yaml)')
   .option('--samples <n>', 'Override samples-per-prompt', (v) => parseInt(v, 10))
   .option(
     '--only <ids>',
