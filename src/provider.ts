@@ -1,6 +1,6 @@
 import { execa } from 'execa';
 import { access, mkdir, realpath, writeFile, readdir, symlink } from 'node:fs/promises';
-import { join, basename, relative } from 'node:path';
+import { join, basename, relative, resolve as resolvePath } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import type { RunUsage, ToolCall } from './types.js';
@@ -220,9 +220,11 @@ async function setupTempPlugin(pluginDir: string): Promise<TempPluginSetup | nul
 
 export async function invokeClaude(opts: InvokeClaudeOptions): Promise<InvokeClaudeResult> {
   const debug = opts.debug ?? noopDebug();
-  // Setup temp plugin if needed
-  const tempSetup = await setupTempPlugin(opts.pluginDir);
-  const effectivePluginDir = tempSetup?.tempDir ?? opts.pluginDir;
+  // Resolve pluginDir to absolute so EVAL_BENCH_PLUGIN_DIR is correct regardless
+  // of the child process cwd (which is an isolated temp dir, not the parent cwd).
+  const absolutePluginDir = resolvePath(opts.pluginDir);
+  const tempSetup = await setupTempPlugin(absolutePluginDir);
+  const effectivePluginDir = tempSetup?.tempDir ?? absolutePluginDir;
 
   // Auto-inject `--output-format stream-json` so we can capture token usage
   // and tool calls. If the user already specified an output format, respect
@@ -248,6 +250,11 @@ export async function invokeClaude(opts: InvokeClaudeOptions): Promise<InvokeCla
       // inside the child (macOS /var/folders → /private/var/folders, symlinked
       // workspaces, etc.).
       canonicalCwd = await realpath(opts.cwd);
+      // Symlink project/ → pluginDir so Claude can read source files directly
+      // without Bash navigation, while each run's cwd stays isolated.
+      // collectRunFiles skips symlinks so the project tree isn't inlined into
+      // judge input — only files Claude actually wrote are captured.
+      await symlink(effectivePluginDir, join(canonicalCwd, 'project'), 'dir').catch(() => {});
     }
     debug.event(
       'subprocess-req',
