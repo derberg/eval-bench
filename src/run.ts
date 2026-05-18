@@ -1,4 +1,4 @@
-import { writeFile } from 'node:fs/promises';
+import { writeFile, readdir, readFile, stat } from 'node:fs/promises';
 import { realpathSync } from 'node:fs';
 import { resolve as resolvePath, join, relative } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -234,6 +234,48 @@ function describeError(e: unknown): string {
   return parts.join(' → ');
 }
 
+const MAX_FILE_BYTES = 100_000;
+
+async function collectRunFiles(cwd: string): Promise<string> {
+  const sections: string[] = [];
+  async function walk(dir: string): Promise<void> {
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await walk(full);
+      } else if (entry.isFile()) {
+        const rel = relative(cwd, full);
+        try {
+          const s = await stat(full);
+          if (s.size > MAX_FILE_BYTES) {
+            sections.push(`--- FILE: ${rel} ---\n[file too large to include (${s.size} bytes)]\n---`);
+            continue;
+          }
+          const content = await readFile(full, 'utf8');
+          sections.push(`--- FILE: ${rel} ---\n${content}\n---`);
+        } catch {
+          // skip unreadable files
+        }
+      }
+    }
+  }
+  await walk(cwd);
+  return sections.join('\n\n');
+}
+
+async function buildJudgeOutput(run: RunResult): Promise<string> {
+  if (!run.cwd) return run.output;
+  const files = await collectRunFiles(run.cwd);
+  if (!files) return run.output;
+  return `${run.output}\n\n=== Files written during run ===\n\n${files}`;
+}
+
 async function judgeRun(
   row: MatrixRow,
   run: RunResult,
@@ -261,7 +303,8 @@ async function judgeRun(
       error: 'run failed',
     });
   } else {
-    const judgePromptBytes = row.prompt.length + run.output.length + row.rubric.length;
+    const judgeOutput = await buildJudgeOutput(run);
+    const judgePromptBytes = row.prompt.length + judgeOutput.length + row.rubric.length;
     debug.event('judge-start', {
       rowId: row.id,
       provider: judgeCfg.provider,
@@ -272,7 +315,7 @@ async function judgeRun(
     try {
       const j = await judge(
         judgeCfg,
-        { prompt: row.prompt, output: run.output, rubric: row.rubric },
+        { prompt: row.prompt, output: judgeOutput, rubric: row.rubric },
         debug,
       );
       judgment = {
