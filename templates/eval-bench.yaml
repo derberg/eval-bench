@@ -6,7 +6,7 @@ plugin:
 
 provider:
   command: claude
-  timeout: 180
+  timeout: 600
   model: claude-opus-4-7
   # Each Claude run gets its own working dir under the snapshot. By default
   # that's "{{snapshots_dir}}/{{snapshot_name}}/{{variant}}/{{prompt_id}}/{{sample}}",
