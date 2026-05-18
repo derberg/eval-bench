@@ -22,6 +22,12 @@ const VALID_PROVIDERS: JudgeProvider[] = [
   'claude-cli',
 ];
 const JUDGE_SPEC_RE = /^([a-z-]+):(.+)$/;
+const DEFAULT_JUDGE = 'anthropic:claude-haiku-4-5-20251001';
+const SHORTHANDS: Record<string, string> = {
+  haiku: 'anthropic:claude-haiku-4-5-20251001',
+  sonnet: 'anthropic:claude-sonnet-4-6',
+  opus: 'anthropic:claude-opus-4-7',
+};
 
 export type NoConfigResult =
   | { action: 'init' }
@@ -78,13 +84,15 @@ export function handleMissingConfig(
           output.write('\n');
           output.write(STEP('  Judge') + SUBTLE(' · provider:model\n'));
           output.write(
-            SUBTLE('    Examples: ') +
-              EXAMPLE('anthropic:claude-haiku-4-5-20251001') +
-              SUBTLE('  ') +
+            SUBTLE('    Press enter for ') + EXAMPLE(DEFAULT_JUDGE) + '\n',
+          );
+          output.write(
+            SUBTLE('    Shorthands: ') +
+              EXAMPLE(Object.keys(SHORTHANDS).join(', ')) +
+              SUBTLE('  or full ') +
               EXAMPLE('ollama:qwen2.5:14b') +
               '\n',
           );
-          output.write(SUBTLE('    Providers: ') + EXAMPLE(VALID_PROVIDERS.join(', ')) + '\n');
           output.write(ARROW);
           return;
         }
@@ -94,7 +102,8 @@ export function handleMissingConfig(
       }
 
       if (phase === 'judge') {
-        const m = choice.match(JUDGE_SPEC_RE);
+        const raw = choice === '' ? DEFAULT_JUDGE : (SHORTHANDS[choice.toLowerCase()] ?? choice);
+        const m = raw.match(JUDGE_SPEC_RE);
         if (!m || !VALID_PROVIDERS.includes(m[1] as JudgeProvider)) {
           output.write(
             CROSS +
@@ -106,7 +115,7 @@ export function handleMissingConfig(
         const [, provider, model] = m;
         resolved = true;
         rl.close();
-        output.write(TICK + SUBTLE('judge = ') + chalk.bold(choice) + '\n\n');
+        output.write(TICK + SUBTLE('judge = ') + chalk.bold(raw) + '\n\n');
         const config: Config = {
           plugin: { path: './', gitRoot: './' },
           provider: {
