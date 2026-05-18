@@ -59,6 +59,7 @@ program
   .option('--dry-run', 'Print planned matrix without running')
   .option('--debug', 'Write a per-event debug log to the snapshot dir and mirror to stderr')
   .option('-v, --verbose')
+  .option('--no-tty', 'Skip interactive prompts — exit with an error if config is missing instead of offering to init or run inline')
   .action(async (opts) => {
     const { runCommand } = await import('./run.js');
     const code = await runCommand({
@@ -85,6 +86,7 @@ program
       retryFailed: Boolean(opts.retryFailed),
       rejudge: Boolean(opts.rejudge),
       promptInline: Boolean(opts.promptInline),
+      noInteractive: opts.tty === false,
       dryRun: opts.dryRun,
       debug: Boolean(opts.debug),
       verbose: opts.verbose,

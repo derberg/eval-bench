@@ -34,6 +34,7 @@ export interface RunOptions {
   retryFailed?: boolean;
   rejudge?: boolean;
   promptInline?: boolean;
+  noInteractive?: boolean;
   dryRun?: boolean;
   debug?: boolean;
   verbose?: boolean;
@@ -127,7 +128,27 @@ export async function runCommand(opts: RunOptions): Promise<number> {
   }
   const configPath = opts.config ?? '.eval-bench/eval-bench.yaml';
   const promptsPath = opts.prompts ?? '.eval-bench/prompts.yaml';
-  const cfg = applyOverrides(loadConfig(configPath), opts);
+
+  let cfg!: Config;
+  try {
+    cfg = applyOverrides(loadConfig(configPath), opts);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT' && !opts.config) {
+      const { handleMissingConfig } = await import('./no-config.js');
+      const result = await handleMissingConfig(configPath, Boolean(opts.noInteractive));
+      if (result.action === 'error') return 1;
+      if (result.action === 'init') {
+        const { runInit } = await import('./init.js');
+        await runInit({ cwd: opts.cwd, ci: false });
+        return 0;
+      }
+      opts.promptInline = true;
+      cfg = applyOverrides(result.config, opts);
+    } else {
+      err((e as Error).message);
+      return 1;
+    }
+  }
 
   // --no-save reroutes the snapshots dir to a tempdir so per-row cwd
   // templating (which references {{snapshots_dir}}/{{snapshot_name}}) still
