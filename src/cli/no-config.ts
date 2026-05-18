@@ -22,11 +22,11 @@ const VALID_PROVIDERS: JudgeProvider[] = [
   'claude-cli',
 ];
 const JUDGE_SPEC_RE = /^([a-z-]+):(.+)$/;
-const DEFAULT_JUDGE = 'anthropic:claude-haiku-4-5-20251001';
+const DEFAULT_JUDGE = 'claude-cli:claude-haiku-4-5-20251001';
 const SHORTHANDS: Record<string, string> = {
-  haiku: 'anthropic:claude-haiku-4-5-20251001',
-  sonnet: 'anthropic:claude-sonnet-4-6',
-  opus: 'anthropic:claude-opus-4-7',
+  haiku: 'claude-cli:claude-haiku-4-5-20251001',
+  sonnet: 'claude-cli:claude-sonnet-4-6',
+  opus: 'claude-cli:claude-opus-4-7',
 };
 
 export type NoConfigResult =
