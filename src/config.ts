@@ -45,7 +45,7 @@ const ConfigSchema = z
     runs: z
       .object({
         samples: z.number().int().positive().default(3),
-        parallel: z.number().int().positive().default(2),
+        parallel: z.number().int().positive().default(1),
       })
       .default({}),
     snapshots: z

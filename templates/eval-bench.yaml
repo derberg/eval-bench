@@ -54,7 +54,7 @@ judge:
 
 runs:
   samples: 3
-  parallel: 2
+  parallel: 1
 
 snapshots:
   dir: ./.eval-bench/snapshots

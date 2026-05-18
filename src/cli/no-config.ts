@@ -35,10 +35,10 @@ export type NoConfigResult =
   | { action: 'error' };
 
 // Called when eval-bench run finds no config file.
-// Non-interactive (--no-interactive or non-TTY): prints a helpful error and
+// Non-interactive (--no-tty or non-TTY): prints a helpful error and
 // returns { action: 'error' }.
 // Interactive TTY: prompts the user to either init or run a one-time inline
-// prompt, collecting the judge spec for the inline path.
+// prompt, collecting the judge spec and cwd preference for the inline path.
 export function handleMissingConfig(
   configPath: string,
   noInteractive: boolean,
@@ -55,7 +55,9 @@ export function handleMissingConfig(
 
   return new Promise<NoConfigResult>((resolve) => {
     const rl = createInterface({ input, output, terminal: true });
-    let phase: 'menu' | 'judge' = 'menu';
+    let phase: 'menu' | 'judge' | 'cwd' = 'menu';
+    let judgeProvider: JudgeProvider;
+    let judgeModel: string;
     let resolved = false;
 
     output.write('\n');
@@ -83,9 +85,7 @@ export function handleMissingConfig(
           output.write(TICK + 'inline\n');
           output.write('\n');
           output.write(STEP('  Judge') + SUBTLE(' · provider:model\n'));
-          output.write(
-            SUBTLE('    Press enter for ') + EXAMPLE(DEFAULT_JUDGE) + '\n',
-          );
+          output.write(SUBTLE('    Press enter for ') + EXAMPLE(DEFAULT_JUDGE) + '\n');
           output.write(
             SUBTLE('    Shorthands: ') +
               EXAMPLE(Object.keys(SHORTHANDS).join(', ')) +
@@ -112,10 +112,29 @@ export function handleMissingConfig(
           output.write(ARROW);
           return;
         }
-        const [, provider, model] = m;
+        judgeProvider = m[1] as JudgeProvider;
+        judgeModel = m[2];
+        output.write(TICK + SUBTLE('judge = ') + chalk.bold(raw) + '\n');
+        phase = 'cwd';
+        output.write('\n');
+        output.write(STEP('  Working directory') + SUBTLE(' · where Claude runs\n'));
+        output.write(`  ${chalk.bold('1')} ${SUBTLE('·')} current dir — Claude reads your project files directly ${SUBTLE('(default)')}\n`);
+        output.write(`  ${chalk.bold('2')} ${SUBTLE('·')} isolated    — Claude runs in a fresh temp dir\n`);
+        output.write(ARROW);
+        return;
+      }
+
+      if (phase === 'cwd') {
+        const useCurrent = choice === '' || choice === '1' || choice.toLowerCase() === 'current';
+        const useIsolated = choice === '2' || choice.toLowerCase() === 'isolated';
+        if (!useCurrent && !useIsolated) {
+          output.write(CROSS + SUBTLE('enter 1 (current dir) or 2 (isolated)\n'));
+          output.write(ARROW);
+          return;
+        }
         resolved = true;
         rl.close();
-        output.write(TICK + SUBTLE('judge = ') + chalk.bold(raw) + '\n\n');
+        output.write(TICK + SUBTLE('cwd = ') + chalk.bold(useCurrent ? 'current dir' : 'isolated') + '\n\n');
         const config: Config = {
           plugin: { path: './', gitRoot: './' },
           provider: {
@@ -124,18 +143,18 @@ export function handleMissingConfig(
             timeout: 600,
             model: null,
             allowedTools: null,
-            cwd: '{{snapshots_dir}}/{{snapshot_name}}/{{variant}}/{{prompt_id}}/{{sample}}',
+            cwd: useCurrent ? null : '{{snapshots_dir}}/{{snapshot_name}}/{{variant}}/{{prompt_id}}/{{sample}}',
           },
           judge: {
-            provider: provider as JudgeProvider,
-            model,
+            provider: judgeProvider,
+            model: judgeModel,
             endpoint: null,
             apiKeyEnv: null,
             temperature: 0,
             maxTokens: 1024,
             template: null,
           },
-          runs: { samples: 3, parallel: 2 },
+          runs: { samples: 3, parallel: 1 },
           snapshots: { dir: './.eval-bench/snapshots' },
         };
         resolve({ action: 'inline', config });
