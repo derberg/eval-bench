@@ -1,7 +1,8 @@
-import { writeFile, readdir, readFile, stat, mkdir } from 'node:fs/promises';
+import { writeFile, readdir, readFile, stat, mkdir, unlink, rm } from 'node:fs/promises';
 import { realpathSync } from 'node:fs';
 import { resolve as resolvePath, join, relative } from 'node:path';
 import { createHash } from 'node:crypto';
+import { execa } from 'execa';
 import type {
   PromptSpec,
   Variant,
@@ -18,7 +19,6 @@ import { hashRubric } from './judges/rubric.js';
 import { JudgeParseError } from './judges/parse.js';
 import type { DebugLogger } from './debug.js';
 import { noopDebug } from './debug.js';
-import { createWorktree } from './swap.js';
 
 interface CwdContext {
   snapshotsDir: string;
@@ -403,6 +403,48 @@ async function judgeRun(
   return judgment;
 }
 
+// Returns a snapshot of which paths are dirty (modified or untracked) in `dir`.
+// Used to detect what Claude wrote so we can reset it after the run.
+async function captureGitStatus(dir: string): Promise<Map<string, string>> {
+  try {
+    const { stdout } = await execa('git', ['status', '--porcelain'], { cwd: dir });
+    const map = new Map<string, string>();
+    for (const line of stdout.split('\n').filter((l) => l.trim())) {
+      const xy = line.slice(0, 2).trim();
+      let p = line.slice(3).trim();
+      // git quotes paths with special chars; strip surrounding quotes if present
+      if (p.startsWith('"') && p.endsWith('"')) p = p.slice(1, -1);
+      map.set(join(dir, p), xy);
+    }
+    return map;
+  } catch {
+    return new Map();
+  }
+}
+
+// Reverts changes Claude made during a run. Only touches paths that were NOT
+// dirty before the run (preserving any user-owned uncommitted changes).
+// Tracked-file modifications are restored via `git checkout`; new untracked
+// files/dirs are deleted outright.
+async function resetClaudeWrites(dir: string, before: Map<string, string>): Promise<void> {
+  const after = await captureGitStatus(dir);
+  for (const [absPath, xy] of after) {
+    if (before.has(absPath)) continue; // existed before the run — don't touch
+    if (xy === '??' || xy === '?') {
+      // Untracked file or directory Claude created — remove it
+      const s = await stat(absPath).catch(() => null);
+      if (s?.isDirectory()) {
+        await rm(absPath, { recursive: true, force: true }).catch(() => {});
+      } else {
+        await unlink(absPath).catch(() => {});
+      }
+    } else {
+      // Tracked file modified by Claude — restore to HEAD
+      await execa('git', ['checkout', 'HEAD', '--', absPath], { cwd: dir }).catch(() => {});
+    }
+  }
+}
+
 async function runAndJudge(
   row: MatrixRow,
   opts: RunBenchmarkOptions,
@@ -412,20 +454,8 @@ async function runAndJudge(
   opts.onProgress?.({ kind: 'run-start', rowId: row.id });
   const pluginDir =
     row.variant === 'baseline' ? opts.baselinePluginDir : opts.currentPluginDir;
+  const absolutePluginDir = pluginDir ? resolvePath(pluginDir) : null;
 
-  // Create an isolated git worktree per sample so runs can't overwrite each
-  // other's files. Falls back silently if pluginDir isn't a git repo.
-  let sampleWt: Awaited<ReturnType<typeof createWorktree>> | null = null;
-  if (pluginDir) {
-    try {
-      sampleWt = await createWorktree(pluginDir, 'HEAD');
-    } catch {
-      // not a git repo or git unavailable — no per-sample isolation
-    }
-  }
-
-  // Artifact cwd (transcript.jsonl) uses the template-based path so it lands
-  // inside the snapshot dir and survives worktree cleanup.
   const artifactCwd = resolveCwd(opts.config.provider.cwd, {
     snapshotsDir: opts.config.snapshots.dir,
     snapshotName: opts.name,
@@ -434,10 +464,12 @@ async function runAndJudge(
     sample: row.sample,
     pluginDir,
   });
-  // Claude itself runs in the isolated worktree (if available) so it reads and
-  // writes against its own copy of the project.
-  const claudeCwd = sampleWt?.path ?? artifactCwd;
-  const claudePluginDir = sampleWt?.path ?? pluginDir;
+
+  // Snapshot git state before Claude runs so we can revert only the files
+  // Claude touched — preserving any user-owned uncommitted changes.
+  const beforeGitStatus = absolutePluginDir
+    ? await captureGitStatus(absolutePluginDir)
+    : new Map<string, string>();
 
   debug.event('run-start', {
     rowId: row.id,
@@ -445,8 +477,7 @@ async function runAndJudge(
     promptId: row.promptId,
     sample: row.sample,
     promptHash: shortHash(row.prompt),
-    cwd: claudeCwd,
-    isolated: Boolean(sampleWt),
+    cwd: artifactCwd,
   });
 
   try {
@@ -454,11 +485,11 @@ async function runAndJudge(
       command: opts.config.provider.command,
       extraArgs: opts.config.provider.extraArgs,
       prompt: row.prompt,
-      pluginDir: claudePluginDir,
+      pluginDir,
       timeoutMs: opts.config.provider.timeout * 1000,
       model: opts.config.provider.model,
       allowedTools: opts.config.provider.allowedTools,
-      cwd: claudeCwd,
+      cwd: artifactCwd,
       debug,
     });
     opts.onProgress?.({
@@ -472,7 +503,6 @@ async function runAndJudge(
       debug.event('tool-call', { rowId: row.id, tool: tc.tool, input: JSON.stringify(tc.input) });
     }
 
-    // Save transcript to the artifact cwd (not the worktree) so it persists.
     let transcriptFile: string | null = null;
     if (r.rawTranscript && artifactCwd) {
       await mkdir(artifactCwd, { recursive: true });
@@ -512,7 +542,11 @@ async function runAndJudge(
     const judgment = await judgeRun(row, run, judgeCfg, opts.onProgress, debug);
     return { run, judgment };
   } finally {
-    if (sampleWt) await sampleWt.cleanup();
+    // After judging (so judge can still read files from disk), revert what
+    // Claude wrote so the next sample starts with a clean plugin directory.
+    if (absolutePluginDir) {
+      await resetClaudeWrites(absolutePluginDir, beforeGitStatus).catch(() => {});
+    }
   }
 }
 
