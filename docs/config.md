@@ -126,3 +126,37 @@ Rules:
 - `prompt` and `rubric` are required and non-empty.
 
 See [rubrics.md](rubrics.md) for guidance on writing rubrics that produce reliable scores.
+
+## CLI flags for `eb run`
+
+These flags are available on every `eb run` invocation and override the corresponding config values.
+
+| flag | description |
+|------|-------------|
+| `--prompt-inline` | Skip the prompts file and enter a one-shot prompt interactively. The snapshot is ephemeral (not saved to `snapshots.dir`) unless you also pass `--save-as <name>`. Implies current-variant only — no baseline. |
+| `--no-tty` | Disable the interactive menu. If the config file is missing, print a helpful error and exit instead of prompting. Useful in scripts and CI. |
+| `--timeout <s>` | Override `provider.timeout` for this run. Default is 800 s. Increase for prompts that ask Claude to explore and write large documents. |
+| `--judge <provider:model>` | Override the judge for this run, e.g. `claude-cli:claude-haiku-4-5-20251001` or `ollama:qwen2.5:14b`. |
+| `--samples <n>` | Override `runs.samples` for this run. |
+| `--save-as <name>` | Name for the saved snapshot. Defaults to an ISO timestamp. |
+| `--no-save` | Don't persist the snapshot to `snapshots.dir`. A temporary snapshot is still written so the file:// links work. |
+| `--only <ids>` | Comma-separated list of prompt IDs to run (filters the matrix). |
+| `--retry-failed` | Re-run only the failed rows in an existing snapshot. |
+| `--rejudge` | Re-judge cached runs with the current judge config (skips Claude). |
+| `--force` | Overwrite an existing snapshot unconditionally. |
+| `--baseline <ref>` | Git ref for the baseline worktree. Default: `HEAD~1`. |
+| `--current <ref>` | Git ref for the current worktree. Default: `HEAD`. |
+| `--baseline-from <name>` | Reuse runs from a saved snapshot as the baseline instead of re-running Claude. |
+
+### Inline judge shorthands
+
+When `--judge` or the interactive menu asks for a judge spec, these shorthands expand automatically:
+
+| shorthand | expands to |
+|-----------|-----------|
+| `haiku` | `claude-cli:claude-haiku-4-5-20251001` |
+| `sonnet` | `claude-cli:claude-sonnet-4-6` |
+| `opus` | `claude-cli:claude-opus-4-7` |
+| _(enter)_ | `claude-cli:claude-haiku-4-5-20251001` (default) |
+
+All `claude-cli` judges use your local Claude Code auth — no `ANTHROPIC_API_KEY` needed.

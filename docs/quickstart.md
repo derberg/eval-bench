@@ -2,6 +2,50 @@
 
 Get from zero to your first benchmark comparison in ten minutes.
 
+## No-config quick test
+
+Don't have a config file yet? Run `eval-bench run` (or `eb run`) in your plugin directory. If no `.eval-bench/eval-bench.yaml` is found, eval-bench enters interactive mode:
+
+```
+  ✦ eval-bench · no config found at .eval-bench/eval-bench.yaml
+
+  What would you like to do?
+
+  1 · init   — scaffold .eval-bench/eval-bench.yaml and prompts.yaml
+  2 · inline — run a one-time prompt without a config file
+
+  ›
+```
+
+Choose **1** to scaffold a config (same as `eb init`), or **2** to run a single one-off prompt right now. The inline path asks for a judge:
+
+```
+  Judge · provider:model
+    Press enter for claude-cli:claude-haiku-4-5-20251001
+    Shorthands: haiku, sonnet, opus  or full  ollama:qwen2.5:14b
+  ›
+```
+
+Press Enter to use Haiku (no API key needed — uses your local Claude auth), type a shorthand like `sonnet`, or enter a full `provider:model` spec. Claude then runs your prompt, the judge scores it, and a temporary snapshot is printed with clickable file:// links.
+
+**Skip the interactive menu:**
+
+```bash
+# Run a one-shot inline prompt directly (skips the menu)
+eb run --prompt-inline
+
+# Non-interactive: error out instead of prompting (useful in scripts)
+eb run --no-tty
+```
+
+**Override the timeout for long-running tasks:**
+
+```bash
+eb run --prompt-inline --timeout 900
+```
+
+The default timeout is 800 s. Increase it for prompts that ask Claude to explore and write large documents.
+
 ## Prerequisites
 
 - Node 20+
