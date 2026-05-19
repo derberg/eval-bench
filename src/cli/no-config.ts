@@ -123,7 +123,7 @@ export function handleMissingConfig(
           provider: {
             command: 'claude',
             extraArgs: [],
-            timeout: 480,
+            timeout: 800,
             model: null,
             allowedTools: null,
             cwd: '{{snapshots_dir}}/{{snapshot_name}}/{{variant}}/{{prompt_id}}/{{sample}}',
