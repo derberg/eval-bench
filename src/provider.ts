@@ -250,11 +250,6 @@ export async function invokeClaude(opts: InvokeClaudeOptions): Promise<InvokeCla
       // inside the child (macOS /var/folders → /private/var/folders, symlinked
       // workspaces, etc.).
       canonicalCwd = await realpath(opts.cwd);
-      // Symlink project/ → pluginDir so Claude can read source files directly
-      // without Bash navigation, while each run's cwd stays isolated.
-      // collectRunFiles skips symlinks so the project tree isn't inlined into
-      // judge input — only files Claude actually wrote are captured.
-      await symlink(effectivePluginDir, join(canonicalCwd, 'project'), 'dir').catch(() => {});
     }
     debug.event(
       'subprocess-req',

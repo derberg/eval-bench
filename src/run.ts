@@ -269,11 +269,49 @@ async function collectRunFiles(cwd: string): Promise<string> {
   return sections.join('\n\n');
 }
 
+// Extract files written by Claude from its tool calls. Write tool calls carry
+// the full content inline; Edit tool calls carry only the patch, so we read the
+// resulting file from disk. Deduplicated by path — last write wins.
+async function collectToolCallFiles(toolCalls: RunResult['toolCalls']): Promise<string> {
+  if (!toolCalls || toolCalls.length === 0) return '';
+  const files = new Map<string, string>();
+  for (const tc of toolCalls) {
+    const inp = tc.input as Record<string, unknown>;
+    const path = inp.file_path as string | undefined;
+    if (!path) continue;
+    if (tc.tool === 'Write' && typeof inp.content === 'string') {
+      files.set(path, inp.content);
+    } else if (tc.tool === 'Edit') {
+      // Read the post-edit file from disk (best-effort).
+      try {
+        const s = await stat(path);
+        if (s.size <= MAX_FILE_BYTES) {
+          files.set(path, await readFile(path, 'utf8'));
+        } else {
+          files.set(path, `[file too large to include (${s.size} bytes)]`);
+        }
+      } catch {
+        // file may have been deleted or moved — skip
+      }
+    }
+  }
+  if (files.size === 0) return '';
+  return [...files.entries()]
+    .map(([p, content]) => `--- FILE: ${p} ---\n${content}\n---`)
+    .join('\n\n');
+}
+
 async function buildJudgeOutput(run: RunResult): Promise<string> {
+  // First try tool calls — reliable regardless of where Claude wrote the files.
+  const fromToolCalls = await collectToolCallFiles(run.toolCalls);
+  if (fromToolCalls) {
+    return `${run.output}\n\n=== Files written during run ===\n\n${fromToolCalls}`;
+  }
+  // Fall back to scanning the run cwd for files Claude may have created there.
   if (!run.cwd) return run.output;
-  const files = await collectRunFiles(run.cwd);
-  if (!files) return run.output;
-  return `${run.output}\n\n=== Files written during run ===\n\n${files}`;
+  const fromCwd = await collectRunFiles(run.cwd);
+  if (!fromCwd) return run.output;
+  return `${run.output}\n\n=== Files written during run ===\n\n${fromCwd}`;
 }
 
 async function judgeRun(
