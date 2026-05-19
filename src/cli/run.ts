@@ -501,6 +501,7 @@ export async function runCommand(opts: RunOptions): Promise<number> {
       const snapshotDir = join(cfg.snapshots.dir, name);
       ok(`Run complete (ephemeral — kept under tempdir, not under snapshots.dir)`);
       info('');
+      info(`  ▸ Folder:    file://${snapshotDir}`);
       info(`  ▸ Snapshot:  file://${join(snapshotDir, 'snapshot.json')}`);
       info(`  ▸ View HTML: file://${join(snapshotDir, 'view.html')}`);
       info(`  ▸ View CLI:  eval-bench view ${name} --snapshot-dir ${cfg.snapshots.dir}`);
