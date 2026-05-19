@@ -1,6 +1,7 @@
-import { writeFile, readdir, readFile, stat, mkdir, unlink, rm } from 'node:fs/promises';
+import { writeFile, readdir, readFile, stat, mkdir, unlink, rm, mkdtemp } from 'node:fs/promises';
 import { realpathSync } from 'node:fs';
-import { resolve as resolvePath, join, relative, dirname } from 'node:path';
+import { resolve as resolvePath, join, relative, dirname, isAbsolute } from 'node:path';
+import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { execa } from 'execa';
 import type {
@@ -270,10 +271,11 @@ async function collectRunFiles(cwd: string): Promise<string> {
   return sections.join('\n\n');
 }
 
-// Mirrors Claude's file writes into destDir so each sample has its own
-// isolated snapshot of what it produced. Write tool calls carry content
-// inline; Edit calls require reading the resulting file from disk — call
+// Saves files Claude wrote to the plugin dir (via absolute paths) into destDir.
+// Write tool calls carry content inline; Edit calls are read from disk — call
 // this before the post-run git cleanup reverts the project directory.
+// Relative-path writes (which land in Claude's cwd) are handled separately
+// by copyDirToOutput.
 async function saveToolCallOutputs(
   toolCalls: RunResult['toolCalls'],
   pluginDir: string,
@@ -285,7 +287,7 @@ async function saveToolCallOutputs(
   for (const tc of toolCalls) {
     const inp = tc.input as Record<string, unknown>;
     const rawPath = inp.file_path as string | undefined;
-    if (!rawPath) continue;
+    if (!rawPath || !isAbsolute(rawPath)) continue; // relative paths handled via cwd scan
     const abs = resolvePath(rawPath);
     const rel = relative(absPlugin, abs);
     if (rel.startsWith('..') || rel === '') continue; // outside plugin dir — skip
@@ -306,6 +308,30 @@ async function saveToolCallOutputs(
     const dest = join(destDir, rel);
     await mkdir(dirname(dest), { recursive: true });
     await writeFile(dest, content, 'utf8');
+  }
+}
+
+// Recursively copies all files from srcDir into destDir, mirroring the
+// directory structure. Used to capture files Claude wrote with relative paths
+// (which land in its isolated cwd) into the persistent artifact dir.
+async function copyDirToOutput(srcDir: string, destDir: string): Promise<void> {
+  const entries = await readdir(srcDir, { withFileTypes: true }).catch(() => []);
+  for (const entry of entries) {
+    const src = join(srcDir, entry.name);
+    const dest = join(destDir, entry.name);
+    if (entry.isDirectory()) {
+      await copyDirToOutput(src, dest);
+    } else if (entry.isFile()) {
+      try {
+        const s = await stat(src);
+        if (s.size > MAX_FILE_BYTES) continue;
+        const content = await readFile(src, 'utf8');
+        await mkdir(destDir, { recursive: true });
+        await writeFile(dest, content, 'utf8');
+      } catch {
+        // skip unreadable files
+      }
+    }
   }
 }
 
@@ -458,6 +484,8 @@ async function runAndJudge(
     row.variant === 'baseline' ? opts.baselinePluginDir : opts.currentPluginDir;
   const absolutePluginDir = pluginDir ? resolvePath(pluginDir) : null;
 
+  // artifactCwd: persisted per-sample dir inside the snapshot tree (for
+  // transcript, output files, and run.cwd stored in the snapshot).
   const artifactCwd = resolveCwd(opts.config.provider.cwd, {
     snapshotsDir: opts.config.snapshots.dir,
     snapshotName: opts.name,
@@ -466,6 +494,9 @@ async function runAndJudge(
     sample: row.sample,
     pluginDir,
   });
+  // claudeCwd: fresh isolated temp dir for this sample only. Claude runs here
+  // so it cannot navigate to sibling sample dirs inside the snapshot tree.
+  const claudeCwd = await mkdtemp(join(tmpdir(), 'eb-run-'));
 
   // Snapshot git state before Claude runs so we can revert only the files
   // Claude touched — preserving any user-owned uncommitted changes.
@@ -479,7 +510,7 @@ async function runAndJudge(
     promptId: row.promptId,
     sample: row.sample,
     promptHash: shortHash(row.prompt),
-    cwd: artifactCwd,
+    cwd: claudeCwd,
   });
 
   try {
@@ -491,7 +522,7 @@ async function runAndJudge(
       timeoutMs: opts.config.provider.timeout * 1000,
       model: opts.config.provider.model,
       allowedTools: opts.config.provider.allowedTools,
-      cwd: artifactCwd,
+      cwd: claudeCwd,
       debug,
     });
     opts.onProgress?.({
@@ -505,6 +536,7 @@ async function runAndJudge(
       debug.event('tool-call', { rowId: row.id, tool: tc.tool, input: JSON.stringify(tc.input) });
     }
 
+    const outputDir = artifactCwd ? join(artifactCwd, 'output') : null;
     let transcriptFile: string | null = null;
     if (artifactCwd) {
       await mkdir(artifactCwd, { recursive: true });
@@ -514,10 +546,13 @@ async function runAndJudge(
         const snapshotDir = realpathSync(resolvePath(opts.config.snapshots.dir, opts.name));
         transcriptFile = relative(snapshotDir, tPath);
       }
-      // Mirror Claude's writes into output/ so each sample has an isolated
-      // snapshot the judge can read — call before git cleanup reverts npp.
-      if (pluginDir) {
-        await saveToolCallOutputs(r.toolCalls, pluginDir, join(artifactCwd, 'output')).catch(() => {});
+      if (outputDir) {
+        // Copy relative-path writes (landed in claudeCwd) into output/.
+        await copyDirToOutput(claudeCwd, outputDir).catch(() => {});
+        // Save absolute-path writes to pluginDir into output/ before git cleanup.
+        if (pluginDir) {
+          await saveToolCallOutputs(r.toolCalls, pluginDir, outputDir).catch(() => {});
+        }
       }
     }
 
@@ -544,15 +579,16 @@ async function runAndJudge(
       exitCode: r.exitCode,
       error: r.error,
       usage: r.usage,
-      cwd: artifactCwd ?? r.cwd,
+      cwd: artifactCwd,
       toolCalls: r.toolCalls,
       transcriptFile,
     };
     const judgment = await judgeRun(row, run, judgeCfg, opts.onProgress, debug);
     return { run, judgment };
   } finally {
-    // After judging (so judge can still read files from disk), revert what
-    // Claude wrote so the next sample starts with a clean plugin directory.
+    // Delete the isolated claudeCwd — artifacts already saved to artifactCwd.
+    await rm(claudeCwd, { recursive: true, force: true }).catch(() => {});
+    // Revert what Claude wrote to the plugin dir so the next sample starts clean.
     if (absolutePluginDir) {
       await resetClaudeWrites(absolutePluginDir, beforeGitStatus).catch(() => {});
     }
