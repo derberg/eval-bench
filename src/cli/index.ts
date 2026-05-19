@@ -191,6 +191,20 @@ snapshot.command('rm <name>').action(async (name) => {
 });
 
 program
+  .command('adopt <name>')
+  .description('Persist an ephemeral inline run: copy its snapshot into .eval-bench/snapshots/ and generate eval-bench.yaml + prompts.yaml if not present.')
+  .requiredOption('--snapshot-dir <path>', 'Temp dir printed by the inline run (the file:// path)')
+  .action(async (name, opts) => {
+    const { adoptCommand } = await import('./adopt.js');
+    const code = await adoptCommand({
+      name,
+      snapshotDir: opts.snapshotDir,
+      cwd: process.cwd(),
+    });
+    process.exit(code);
+  });
+
+program
   .command('compare <a> <b>')
   .description('Compare two snapshots.')
   .option('--format <fmt>', 'md | json | both', 'md')

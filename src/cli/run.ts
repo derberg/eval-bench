@@ -504,6 +504,7 @@ export async function runCommand(opts: RunOptions): Promise<number> {
       info(`  ▸ Snapshot:  file://${join(snapshotDir, 'snapshot.json')}`);
       info(`  ▸ View HTML: file://${join(snapshotDir, 'view.html')}`);
       info(`  ▸ View CLI:  eval-bench view ${name} --snapshot-dir ${cfg.snapshots.dir}`);
+      info(`  ▸ Keep it:   eval-bench adopt ${name} --snapshot-dir ${cfg.snapshots.dir}`);
       info('');
       info(`  Tempdir auto-cleans with /tmp on reboot.`);
     } else {
