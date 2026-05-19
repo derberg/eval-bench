@@ -1,6 +1,6 @@
 import { writeFile, readdir, readFile, stat, mkdir, unlink, rm } from 'node:fs/promises';
 import { realpathSync } from 'node:fs';
-import { resolve as resolvePath, join, relative } from 'node:path';
+import { resolve as resolvePath, join, relative, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 import { execa } from 'execa';
 import type {
@@ -270,49 +270,51 @@ async function collectRunFiles(cwd: string): Promise<string> {
   return sections.join('\n\n');
 }
 
-// Extract files written by Claude from its tool calls. Write tool calls carry
-// the full content inline; Edit tool calls carry only the patch, so we read the
-// resulting file from disk. Deduplicated by path — last write wins.
-async function collectToolCallFiles(toolCalls: RunResult['toolCalls']): Promise<string> {
-  if (!toolCalls || toolCalls.length === 0) return '';
+// Mirrors Claude's file writes into destDir so each sample has its own
+// isolated snapshot of what it produced. Write tool calls carry content
+// inline; Edit calls require reading the resulting file from disk — call
+// this before the post-run git cleanup reverts the project directory.
+async function saveToolCallOutputs(
+  toolCalls: RunResult['toolCalls'],
+  pluginDir: string,
+  destDir: string,
+): Promise<void> {
+  if (!toolCalls || toolCalls.length === 0) return;
+  const absPlugin = resolvePath(pluginDir);
   const files = new Map<string, string>();
   for (const tc of toolCalls) {
     const inp = tc.input as Record<string, unknown>;
-    const path = inp.file_path as string | undefined;
-    if (!path) continue;
+    const rawPath = inp.file_path as string | undefined;
+    if (!rawPath) continue;
+    const abs = resolvePath(rawPath);
+    const rel = relative(absPlugin, abs);
+    if (rel.startsWith('..') || rel === '') continue; // outside plugin dir — skip
     if (tc.tool === 'Write' && typeof inp.content === 'string') {
-      files.set(path, inp.content);
+      files.set(rel, inp.content as string);
     } else if (tc.tool === 'Edit') {
-      // Read the post-edit file from disk (best-effort).
       try {
-        const s = await stat(path);
+        const s = await stat(abs);
         if (s.size <= MAX_FILE_BYTES) {
-          files.set(path, await readFile(path, 'utf8'));
-        } else {
-          files.set(path, `[file too large to include (${s.size} bytes)]`);
+          files.set(rel, await readFile(abs, 'utf8'));
         }
       } catch {
         // file may have been deleted or moved — skip
       }
     }
   }
-  if (files.size === 0) return '';
-  return [...files.entries()]
-    .map(([p, content]) => `--- FILE: ${p} ---\n${content}\n---`)
-    .join('\n\n');
+  for (const [rel, content] of files) {
+    const dest = join(destDir, rel);
+    await mkdir(dirname(dest), { recursive: true });
+    await writeFile(dest, content, 'utf8');
+  }
 }
 
 async function buildJudgeOutput(run: RunResult): Promise<string> {
-  // First try tool calls — reliable regardless of where Claude wrote the files.
-  const fromToolCalls = await collectToolCallFiles(run.toolCalls);
-  if (fromToolCalls) {
-    return `${run.output}\n\n=== Files written during run ===\n\n${fromToolCalls}`;
-  }
-  // Fall back to scanning the run cwd for files Claude may have created there.
   if (!run.cwd) return run.output;
-  const fromCwd = await collectRunFiles(run.cwd);
-  if (!fromCwd) return run.output;
-  return `${run.output}\n\n=== Files written during run ===\n\n${fromCwd}`;
+  // Read from the per-sample output dir populated by saveToolCallOutputs.
+  const files = await collectRunFiles(join(run.cwd, 'output'));
+  if (!files) return run.output;
+  return `${run.output}\n\n=== Files written during run ===\n\n${files}`;
 }
 
 async function judgeRun(
@@ -504,12 +506,19 @@ async function runAndJudge(
     }
 
     let transcriptFile: string | null = null;
-    if (r.rawTranscript && artifactCwd) {
+    if (artifactCwd) {
       await mkdir(artifactCwd, { recursive: true });
-      const tPath = join(artifactCwd, 'transcript.jsonl');
-      await writeFile(tPath, r.rawTranscript);
-      const snapshotDir = realpathSync(resolvePath(opts.config.snapshots.dir, opts.name));
-      transcriptFile = relative(snapshotDir, tPath);
+      if (r.rawTranscript) {
+        const tPath = join(artifactCwd, 'transcript.jsonl');
+        await writeFile(tPath, r.rawTranscript);
+        const snapshotDir = realpathSync(resolvePath(opts.config.snapshots.dir, opts.name));
+        transcriptFile = relative(snapshotDir, tPath);
+      }
+      // Mirror Claude's writes into output/ so each sample has an isolated
+      // snapshot the judge can read — call before git cleanup reverts npp.
+      if (pluginDir) {
+        await saveToolCallOutputs(r.toolCalls, pluginDir, join(artifactCwd, 'output')).catch(() => {});
+      }
     }
 
     debug.event('run-end', {
