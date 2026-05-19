@@ -1,4 +1,4 @@
-import { writeFile, readdir, readFile, stat } from 'node:fs/promises';
+import { writeFile, readdir, readFile, stat, mkdir } from 'node:fs/promises';
 import { realpathSync } from 'node:fs';
 import { resolve as resolvePath, join, relative } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -18,6 +18,7 @@ import { hashRubric } from './judges/rubric.js';
 import { JudgeParseError } from './judges/parse.js';
 import type { DebugLogger } from './debug.js';
 import { noopDebug } from './debug.js';
+import { createWorktree } from './swap.js';
 
 interface CwdContext {
   snapshotsDir: string;
@@ -411,7 +412,21 @@ async function runAndJudge(
   opts.onProgress?.({ kind: 'run-start', rowId: row.id });
   const pluginDir =
     row.variant === 'baseline' ? opts.baselinePluginDir : opts.currentPluginDir;
-  const cwd = resolveCwd(opts.config.provider.cwd, {
+
+  // Create an isolated git worktree per sample so runs can't overwrite each
+  // other's files. Falls back silently if pluginDir isn't a git repo.
+  let sampleWt: Awaited<ReturnType<typeof createWorktree>> | null = null;
+  if (pluginDir) {
+    try {
+      sampleWt = await createWorktree(pluginDir, 'HEAD');
+    } catch {
+      // not a git repo or git unavailable — no per-sample isolation
+    }
+  }
+
+  // Artifact cwd (transcript.jsonl) uses the template-based path so it lands
+  // inside the snapshot dir and survives worktree cleanup.
+  const artifactCwd = resolveCwd(opts.config.provider.cwd, {
     snapshotsDir: opts.config.snapshots.dir,
     snapshotName: opts.name,
     variant: row.variant,
@@ -419,74 +434,86 @@ async function runAndJudge(
     sample: row.sample,
     pluginDir,
   });
+  // Claude itself runs in the isolated worktree (if available) so it reads and
+  // writes against its own copy of the project.
+  const claudeCwd = sampleWt?.path ?? artifactCwd;
+  const claudePluginDir = sampleWt?.path ?? pluginDir;
+
   debug.event('run-start', {
     rowId: row.id,
     variant: row.variant,
     promptId: row.promptId,
     sample: row.sample,
     promptHash: shortHash(row.prompt),
-    cwd,
-  });
-  const r = await invokeClaude({
-    command: opts.config.provider.command,
-    extraArgs: opts.config.provider.extraArgs,
-    prompt: row.prompt,
-    pluginDir,
-    timeoutMs: opts.config.provider.timeout * 1000,
-    model: opts.config.provider.model,
-    allowedTools: opts.config.provider.allowedTools,
-    cwd,
-    debug,
-  });
-  opts.onProgress?.({
-    kind: 'run-end',
-    rowId: row.id,
-    durationMs: r.durationMs,
-    error: r.error,
+    cwd: claudeCwd,
+    isolated: Boolean(sampleWt),
   });
 
-  for (const tc of r.toolCalls ?? []) {
-    debug.event('tool-call', { rowId: row.id, tool: tc.tool, input: JSON.stringify(tc.input) });
+  try {
+    const r = await invokeClaude({
+      command: opts.config.provider.command,
+      extraArgs: opts.config.provider.extraArgs,
+      prompt: row.prompt,
+      pluginDir: claudePluginDir,
+      timeoutMs: opts.config.provider.timeout * 1000,
+      model: opts.config.provider.model,
+      allowedTools: opts.config.provider.allowedTools,
+      cwd: claudeCwd,
+      debug,
+    });
+    opts.onProgress?.({
+      kind: 'run-end',
+      rowId: row.id,
+      durationMs: r.durationMs,
+      error: r.error,
+    });
+
+    for (const tc of r.toolCalls ?? []) {
+      debug.event('tool-call', { rowId: row.id, tool: tc.tool, input: JSON.stringify(tc.input) });
+    }
+
+    // Save transcript to the artifact cwd (not the worktree) so it persists.
+    let transcriptFile: string | null = null;
+    if (r.rawTranscript && artifactCwd) {
+      await mkdir(artifactCwd, { recursive: true });
+      const tPath = join(artifactCwd, 'transcript.jsonl');
+      await writeFile(tPath, r.rawTranscript);
+      const snapshotDir = realpathSync(resolvePath(opts.config.snapshots.dir, opts.name));
+      transcriptFile = relative(snapshotDir, tPath);
+    }
+
+    debug.event('run-end', {
+      rowId: row.id,
+      exitCode: r.exitCode,
+      durationMs: r.durationMs,
+      outputBytes: r.output.length,
+      toolCallCount: r.toolCalls?.length ?? 0,
+      transcriptFile,
+      ...(r.usage && {
+        inputTokens: r.usage.inputTokens,
+        outputTokens: r.usage.outputTokens,
+      }),
+      ...(r.error && { error: r.error }),
+    });
+    const run: RunResult = {
+      id: row.id,
+      promptId: row.promptId,
+      variant: row.variant,
+      sample: row.sample,
+      output: r.output,
+      durationMs: r.durationMs,
+      exitCode: r.exitCode,
+      error: r.error,
+      usage: r.usage,
+      cwd: artifactCwd ?? r.cwd,
+      toolCalls: r.toolCalls,
+      transcriptFile,
+    };
+    const judgment = await judgeRun(row, run, judgeCfg, opts.onProgress, debug);
+    return { run, judgment };
+  } finally {
+    if (sampleWt) await sampleWt.cleanup();
   }
-
-  const canonicalCwd = r.cwd ?? cwd;
-  let transcriptFile: string | null = null;
-  if (r.rawTranscript && canonicalCwd) {
-    const tPath = join(canonicalCwd, 'transcript.jsonl');
-    await writeFile(tPath, r.rawTranscript);
-    const snapshotDir = realpathSync(resolvePath(opts.config.snapshots.dir, opts.name));
-    transcriptFile = relative(snapshotDir, tPath);
-  }
-
-  debug.event('run-end', {
-    rowId: row.id,
-    exitCode: r.exitCode,
-    durationMs: r.durationMs,
-    outputBytes: r.output.length,
-    toolCallCount: r.toolCalls?.length ?? 0,
-    transcriptFile,
-    ...(r.usage && {
-      inputTokens: r.usage.inputTokens,
-      outputTokens: r.usage.outputTokens,
-    }),
-    ...(r.error && { error: r.error }),
-  });
-  const run: RunResult = {
-    id: row.id,
-    promptId: row.promptId,
-    variant: row.variant,
-    sample: row.sample,
-    output: r.output,
-    durationMs: r.durationMs,
-    exitCode: r.exitCode,
-    error: r.error,
-    usage: r.usage,
-    cwd: canonicalCwd,
-    toolCalls: r.toolCalls,
-    transcriptFile,
-  };
-  const judgment = await judgeRun(row, run, judgeCfg, opts.onProgress, debug);
-  return { run, judgment };
 }
 
 export async function runBenchmark(opts: RunBenchmarkOptions): Promise<Snapshot> {
