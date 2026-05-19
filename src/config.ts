@@ -16,7 +16,7 @@ const ConfigSchema = z
       .object({
         command: z.string().default('claude'),
         extraArgs: z.array(z.string()).default([]),
-        timeout: z.number().int().positive().default(600),
+        timeout: z.number().int().positive().default(480),
         model: z.string().nullable().default(null),
         allowedTools: z.array(z.string()).nullable().default(null),
         cwd: z
