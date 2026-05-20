@@ -9,31 +9,31 @@ Runs a fixed set of prompts against two versions of your plugin (baseline vs cur
 ```mermaid
 sequenceDiagram
     actor User
-    participant ef
+    participant eb as eb CLI
     participant git
     participant claude as claude CLI
-    participant judge as Judge API<br/>(Ollama/Anthropic/OpenAI)
+    participant judge as Judge (Ollama/Anthropic/OpenAI)
     participant snap as snapshot.json
 
-    User->>ef: ef run --baseline <ref>
-    ef->>git: worktree add baseline + current
-    git-->>ef: two plugin dirs
+    User->>eb: eb run --baseline <ref>
+    eb->>git: worktree add baseline + current
+    git-->>eb: two plugin dirs
 
-    Note over ef,claude: Run phase (parallel)
+    Note over eb,claude: Run phase (parallel)
     loop prompt × {baseline, current} × samples
-        ef->>claude: spawn with plugin dir + prompt
-        claude-->>ef: stdout
+        eb->>claude: spawn with plugin dir + prompt
+        claude-->>eb: stdout
     end
-    Note right of ef: with --baseline-from <name>,<br/>baseline runs are reused<br/>from a saved snapshot.<br/>--current-from <name> does the<br/>same for the current side.
+    Note right of eb: with --baseline-from <name>, baseline runs<br/>are reused from a saved snapshot.<br/>--current-from <name> does the same<br/>for the current side.
 
-    Note over ef,judge: Judge phase (parallel)
+    Note over eb,judge: Judge phase (parallel)
     loop each run
-        ef->>judge: POST {prompt, output, rubric}
-        judge-->>ef: score 0–5 + rationale
+        eb->>judge: POST {prompt, output, rubric}
+        judge-->>eb: score 0–5 + rationale
     end
 
-    ef->>snap: write runs + judgments + stats
-    ef-->>User: ef compare → markdown / HTML
+    eb->>snap: write runs + judgments + stats
+    eb-->>User: eb compare → markdown / HTML
 ```
 
 The provider (`claude` CLI) and judge (HTTP API) are independent — the judge never sees `claude`, only the captured output and your rubric.
@@ -79,12 +79,12 @@ You changed something in the plugin and want to know if it regressed quality vs 
 ```mermaid
 sequenceDiagram
     actor You
-    participant tree as Plugin<br/>(working tree)
+    participant tree as Plugin (working tree)
     participant eb as eb CLI
-    participant prev as v1-baseline<br/>(snapshot)
+    participant prev as v1-baseline (snapshot)
     participant claude as claude CLI
-    participant judge as Judge<br/>(Ollama / Anthropic / OpenAI)
-    participant snap as wip<br/>(snapshot)
+    participant judge as Judge (Ollama/Anthropic/OpenAI)
+    participant snap as wip (snapshot)
 
     You->>tree: edit your plugin
     You->>eb: eb run --baseline-from v1-baseline --save-as wip
@@ -124,10 +124,10 @@ sequenceDiagram
     actor You
     participant prompts as prompts.yaml
     participant eb as eb CLI
-    participant prev as v1-baseline<br/>(snapshot)
+    participant prev as v1-baseline (snapshot)
     participant claude as claude CLI
     participant judge as Judge
-    participant tmp as tempdir<br/>(/tmp/eb-ephemeral-…)
+    participant tmp as tempdir (/tmp/eb-ephemeral-…)
 
     You->>prompts: edit one prompt + rubric
     You->>eb: eb run --baseline-from v1-baseline --only id --no-save
