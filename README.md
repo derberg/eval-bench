@@ -24,7 +24,7 @@ sequenceDiagram
         eb->>claude: spawn with plugin dir + prompt
         claude-->>eb: stdout
     end
-    Note right of eb: with --baseline-from <name>, baseline runs<br/>are reused from a saved snapshot.<br/>--current-from <name> does the same<br/>for the current side.
+    Note right of eb: with --baseline-from, baseline runs are reused from a saved snapshot. --current-from does the same for the current side.
 
     Note over eb,judge: Judge phase (parallel)
     loop each run
@@ -89,20 +89,20 @@ sequenceDiagram
     You->>tree: edit your plugin
     You->>eb: eb run --baseline-from v1-baseline --save-as wip
 
-    Note over eb,prev: The previous snapshot's "current" runs become<br/>this snapshot's "baseline". Zero claude calls,<br/>zero judge calls for that side.
+    Note over eb,prev: The previous snapshot's current runs become this snapshot's baseline. Zero claude and judge calls for that side.
     eb->>prev: load cached runs + judgments
     prev-->>eb: re-stamped as baseline rows
 
-    Note over eb,claude: Each "spawn" = a fresh `claude -p <prompt>` subprocess.<br/>It loads the plugin source from your working tree —<br/>uncommitted changes are included.
+    Note over eb,claude: Each spawn = a fresh claude -p prompt subprocess. Uncommitted plugin changes are included.
     loop prompt × samples
-        eb->>claude: spawn `claude -p <prompt>`
+        eb->>claude: spawn claude -p prompt
         claude-->>eb: stdout
         eb->>judge: prompt + output + rubric
         judge-->>eb: score + rationale
     end
 
     eb->>snap: write baseline + current + summary
-    eb-->>You: baseline mean 4.20 (n=15)<br/>current  mean 4.45 (n=15)<br/>Δ +0.25
+    eb-->>You: baseline 4.20 / current 4.45 / delta +0.25
     You->>eb: eb view wip
     eb-->>You: side-by-side HTML
 ```
@@ -136,19 +136,19 @@ sequenceDiagram
     eb->>prev: load cached baseline runs for id (one per sample)
     prev-->>eb: cached runs + judgments
 
-    Note over eb,tmp: --no-save reroutes snapshots dir to a fresh tempdir<br/>(your configured snapshots.dir stays untouched)
+    Note over eb,tmp: --no-save writes to a fresh tempdir. Your configured snapshots.dir is untouched.
     loop samples
-        eb->>claude: spawn `claude -p <prompt>` (working-tree plugin)
+        eb->>claude: spawn claude -p prompt (working-tree plugin)
         claude-->>eb: stdout
         eb->>judge: prompt + output + rubric
         judge-->>eb: score + rationale
     end
     eb->>tmp: write snapshot.json + view.html + per-row outputs
-    eb-->>You: per-row score + rationale to stdout<br/>+ "View HTML" / "View CLI" copy-paste hints
+    eb-->>You: per-row score + rationale + view.html path
 
-    Note over You: Read rationale or open view.html.<br/>Skill bad? → fix skill / agent / hook.<br/>Rubric off? → edit prompts.yaml.
+    Note over You: Read rationale or open view.html. Fix skill or rubric. Run again.
     You->>eb: same command, again
-    Note over eb,tmp: Fresh tempdir per run; OS reclaims /tmp on reboot.
+    Note over eb,tmp: Fresh tempdir each run. OS reclaims /tmp on reboot.
 ```
 
 ```bash
@@ -177,16 +177,16 @@ sequenceDiagram
     eb->>tty: Step 3/3 · rubric (with example template)
     You->>tty: type rubric, then "."
 
-    Note over eb: Current-side only, no baseline.<br/>Snapshot lands in a tempdir; configured snapshots.dir is untouched.
+    Note over eb: Current-side only, no baseline. Snapshot lands in a tempdir.
     loop samples
-        eb->>claude: spawn `claude -p <prompt>` (working-tree plugin)
+        eb->>claude: spawn claude -p prompt (working-tree plugin)
         claude-->>eb: stdout
         eb->>judge: prompt + output + rubric
         judge-->>eb: score + rationale
     end
-    eb-->>You: score + rationale to stdout<br/>+ tempdir path / view.html path / view CLI hint
+    eb-->>You: score + rationale + tempdir path + view.html path
 
-    Note over You: Tweak skill or rubric.<br/>Up-arrow → run again.
+    Note over You: Tweak skill or rubric. Up-arrow and run again.
 ```
 
 ```bash
