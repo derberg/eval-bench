@@ -6,6 +6,7 @@ import { resolveSha } from '../swap.js';
 import { info, ok, warn, err, progress, step, judgeResult } from '../logger.js';
 import { validateJudgeTemplate } from '../judges/rubric.js';
 import { initDebug, noopDebug, type DebugLogger } from '../debug.js';
+import { describePlugin } from '../provider.js';
 import type { Config, Snapshot } from '../types.js';
 
 export interface EvalOptions {
@@ -55,7 +56,9 @@ export async function evalCommand(opts: EvalOptions): Promise<number> {
   const ref = opts.ref ?? 'HEAD';
   const name = opts.saveAs;
 
-  info(`Plugin:   ${cfg.plugin.path}`);
+  const pluginDesc = await describePlugin(cfg.plugin.path);
+  info(`Plugin:   ${pluginDesc.label}`);
+  info(`          ${pluginDesc.detail}`);
   if (opts.only?.length) {
     info(`Prompts:  ${prompts.length}/${allPrompts.length} (filtered: ${prompts.map((p) => p.id).join(', ')})`);
   }

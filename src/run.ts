@@ -1,6 +1,6 @@
 import { writeFile, readdir, readFile, stat, mkdir, unlink, rm, mkdtemp } from 'node:fs/promises';
 import { realpathSync } from 'node:fs';
-import { resolve as resolvePath, join, relative, dirname, isAbsolute } from 'node:path';
+import { resolve as resolvePath, join, relative, dirname, isAbsolute, sep, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { execa } from 'execa';
@@ -289,8 +289,11 @@ async function saveToolCallOutputs(
     const rawPath = inp.file_path as string | undefined;
     if (!rawPath || !isAbsolute(rawPath)) continue; // relative paths handled via cwd scan
     const abs = resolvePath(rawPath);
-    const rel = relative(absPlugin, abs);
-    if (rel.startsWith('..') || rel === '') continue; // outside plugin dir — skip
+    let rel = relative(absPlugin, abs);
+    if (rel.startsWith('..') || rel === '') {
+      // outside plugin dir — capture anyway, using path relative to fs root
+      rel = abs.replace(/^\/+/, '');
+    }
     if (tc.tool === 'Write' && typeof inp.content === 'string') {
       files.set(rel, inp.content as string);
     } else if (tc.tool === 'Edit') {
@@ -473,6 +476,40 @@ async function resetClaudeWrites(dir: string, before: Map<string, string>): Prom
   }
 }
 
+// Reverts any absolute-path Write/Edit tool calls Claude made to locations
+// outside both claudeCwd (already deleted) and absolutePluginDir (handled by
+// resetClaudeWrites). Tries git-checkout first; falls back to unlink for
+// newly-created untracked files.
+async function undoExternalWrites(
+  toolCalls: RunResult['toolCalls'],
+  claudeCwd: string,
+  absolutePluginDir: string | null,
+): Promise<void> {
+  if (!toolCalls || toolCalls.length === 0) return;
+  const targets = new Set<string>();
+  for (const tc of toolCalls) {
+    if (tc.tool !== 'Write' && tc.tool !== 'Edit') continue;
+    const inp = tc.input as Record<string, unknown>;
+    const rawPath = inp.file_path as string | undefined;
+    if (!rawPath || !isAbsolute(rawPath)) continue;
+    const abs = resolvePath(rawPath);
+    const inCwd = abs === claudeCwd || abs.startsWith(claudeCwd + sep);
+    const inPlugin = absolutePluginDir && (abs === absolutePluginDir || abs.startsWith(absolutePluginDir + sep));
+    if (!inCwd && !inPlugin) targets.add(abs);
+  }
+  for (const abs of targets) {
+    // Try git restore (works for tracked files that were modified or newly added)
+    try {
+      await execa('git', ['-C', dirname(abs), 'checkout', 'HEAD', '--', basename(abs)]);
+      continue;
+    } catch {
+      // not a git-tracked file — fall through
+    }
+    // For untracked new files created by Claude, delete them
+    await unlink(abs).catch(() => {});
+  }
+}
+
 async function runAndJudge(
   row: MatrixRow,
   opts: RunBenchmarkOptions,
@@ -513,6 +550,7 @@ async function runAndJudge(
     cwd: claudeCwd,
   });
 
+  let lastToolCalls: RunResult['toolCalls'] = [];
   try {
     const r = await invokeClaude({
       command: opts.config.provider.command,
@@ -532,7 +570,8 @@ async function runAndJudge(
       error: r.error,
     });
 
-    for (const tc of r.toolCalls ?? []) {
+    lastToolCalls = r.toolCalls ?? [];
+    for (const tc of lastToolCalls) {
       debug.event('tool-call', { rowId: row.id, tool: tc.tool, input: JSON.stringify(tc.input) });
     }
 
@@ -592,6 +631,9 @@ async function runAndJudge(
     if (absolutePluginDir) {
       await resetClaudeWrites(absolutePluginDir, beforeGitStatus).catch(() => {});
     }
+    // Revert any writes Claude made to locations outside both claudeCwd and
+    // pluginDir (e.g. writing to an unrelated repo or /tmp path).
+    await undoExternalWrites(lastToolCalls, claudeCwd, absolutePluginDir).catch(() => {});
   }
 }
 

@@ -1,7 +1,7 @@
 import { execa } from 'execa';
-import { access, mkdir, realpath, writeFile, readdir, symlink } from 'node:fs/promises';
+import { access, mkdir, realpath, writeFile, readdir, symlink, readFile } from 'node:fs/promises';
 import { join, basename, relative, resolve as resolvePath } from 'node:path';
-import { tmpdir } from 'node:os';
+import { tmpdir, homedir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import type { RunUsage, ToolCall } from './types.js';
 import type { DebugLogger } from './debug.js';
@@ -146,6 +146,61 @@ async function discoverFiles(dir: string, pattern: string): Promise<string[]> {
 interface TempPluginSetup {
   tempDir: string;
   cleanup: () => Promise<void>;
+}
+
+export interface PluginDescription {
+  label: string;
+  detail: string;
+}
+
+export async function describePlugin(pluginDir: string): Promise<PluginDescription> {
+  const absDir = resolvePath(pluginDir);
+  const pluginJsonPath = join(absDir, '.claude-plugin', 'plugin.json');
+
+  if (await exists(pluginJsonPath)) {
+    try {
+      const raw = JSON.parse(await readFile(pluginJsonPath, 'utf8'));
+      const version = raw.version ? ` v${raw.version}` : '';
+      const name = raw.name ? ` (${raw.name})` : '';
+      return { label: `local${name}${version}`, detail: absDir };
+    } catch {
+      return { label: 'local (plugin.json)', detail: absDir };
+    }
+  }
+
+  const skillsDir = join(absDir, 'skills');
+  const agentsDir = join(absDir, 'agents');
+  const skillFiles = await discoverFiles(skillsDir, '.md');
+  const agentFiles = await discoverFiles(agentsDir, '.md');
+
+  if (skillFiles.length > 0 || agentFiles.length > 0) {
+    const parts: string[] = [];
+    if (skillFiles.length) parts.push(`${skillFiles.length} skill${skillFiles.length === 1 ? '' : 's'}`);
+    if (agentFiles.length) parts.push(`${agentFiles.length} agent${agentFiles.length === 1 ? '' : 's'}`);
+    return { label: `local (synthesized: ${parts.join(', ')})`, detail: absDir };
+  }
+
+  // No local plugin structure — list globally installed plugins
+  const installedPath = join(homedir(), '.claude', 'plugins', 'installed_plugins.json');
+  try {
+    const raw = JSON.parse(await readFile(installedPath, 'utf8'));
+    const plugins: string[] = Object.entries(raw.plugins ?? {}).map(([key, installs]) => {
+      const arr = installs as Array<{ version?: string }>;
+      const ver = arr[0]?.version ?? 'unknown';
+      const name = key.split('@')[0];
+      return `${name}@${ver}`;
+    });
+    if (plugins.length > 0) {
+      return {
+        label: 'none at path — global installs active',
+        detail: `${absDir}\n  Global: ${plugins.join(', ')}`,
+      };
+    }
+  } catch {
+    // ignore — no installed_plugins.json or parse error
+  }
+
+  return { label: 'none at path — global installs may be active', detail: absDir };
 }
 
 async function setupTempPlugin(pluginDir: string): Promise<TempPluginSetup | null> {

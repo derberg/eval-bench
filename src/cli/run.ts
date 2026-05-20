@@ -9,6 +9,7 @@ import { initDebug, noopDebug, type DebugLogger } from '../debug.js';
 import { readInlinePrompt } from './prompt-inline.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { validateJudgeTemplate } from '../judges/rubric.js';
+import { describePlugin } from '../provider.js';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Config, PromptSpec, Snapshot, RunResult, Judgment, Variant } from '../types.js';
@@ -254,7 +255,9 @@ export async function runCommand(opts: RunOptions): Promise<number> {
     currentSha = await resolveSha(gitRoot, currentRef);
   }
 
-  info(`Plugin:   ${cfg.plugin.path}`);
+  const pluginDesc = await describePlugin(cfg.plugin.path);
+  info(`Plugin:   ${pluginDesc.label}`);
+  info(`          ${pluginDesc.detail}`);
   if (opts.promptInline) {
     info(`Prompts:  1 (inline: ${prompts[0].id})`);
   } else if (opts.only?.length) {
