@@ -2,7 +2,7 @@
 
 Benchmark Claude Code plugins by A/B comparing plugin versions with LLM-judged evaluation prompts.
 
-Runs a fixed set of prompts against two versions of your plugin (baseline vs current), invokes the real `claude` CLI so skills, MCP servers, subagents, slash commands, and hooks actually load, grades each output with a configurable judge (local Ollama, Anthropic, OpenAI, or any OpenAI-compatible endpoint), and produces a side-by-side comparison.
+Runs a fixed set of prompts against two versions of your plugin (baseline vs current), invokes the real `claude` CLI so skills, MCP servers, subagents, slash commands, and hooks actually load, grades each output with a configurable judge (local Ollama, the `claude` CLI itself, Anthropic, OpenAI, OpenRouter, GitHub Models, or any OpenAI-compatible endpoint), and produces a side-by-side comparison.
 
 ## How it works
 
@@ -12,31 +12,27 @@ sequenceDiagram
     participant eb as eb CLI
     participant git
     participant claude as claude CLI
-    participant judge as Judge (Ollama/Anthropic/OpenAI)
+    participant judge as Judge
     participant snap as snapshot.json
 
     User->>eb: eb run --baseline <ref>
-    eb->>git: worktree add baseline + current
-    git-->>eb: two plugin dirs
+    eb->>git: worktree add baseline
+    git-->>eb: baseline dir (current side uses the working tree)
 
-    Note over eb,claude: Run phase (parallel)
+    Note over eb,judge: Per row: claude then judge, interleaved (runs.parallel controls concurrency)
     loop prompt × {baseline, current} × samples
         eb->>claude: spawn with plugin dir + prompt
         claude-->>eb: stdout
+        eb->>judge: invoke {prompt, output, rubric}
+        judge-->>eb: score 0–5 + rationale
     end
     Note right of eb: with --baseline-from, baseline runs are reused from a saved snapshot. --current-from does the same for the current side.
 
-    Note over eb,judge: Judge phase (parallel)
-    loop each run
-        eb->>judge: POST {prompt, output, rubric}
-        judge-->>eb: score 0–5 + rationale
-    end
-
     eb->>snap: write runs + judgments + stats
-    eb-->>User: eb compare → markdown / HTML
+    eb-->>User: eb compare → markdown / json · eb view → HTML
 ```
 
-The provider (`claude` CLI) and judge (HTTP API) are independent — the judge never sees `claude`, only the captured output and your rubric.
+The provider (`claude` CLI) and judge are independent — the judge never sees `claude`, only the captured output and your rubric. Judges are pluggable (Ollama, Anthropic, OpenAI, OpenAI-compatible, OpenRouter, GitHub Models, or the local `claude` CLI as judge); most are HTTP-backed, `claude-cli` shells out.
 
 ## Install
 
@@ -50,7 +46,7 @@ Requires:
 - Node 20+
 - `claude` CLI on PATH ([install instructions](https://docs.anthropic.com/claude-code))
 - Your plugin in a git repo (required for baseline checkout via `git worktree`)
-- A judge: either Ollama installed locally, or an API key for Anthropic/OpenAI
+- A judge: local Ollama, the `claude` CLI itself, or an API key for Anthropic / OpenAI / OpenRouter / GitHub Models / any OpenAI-compatible endpoint (see [docs/judges.md](docs/judges.md))
 
 **Note:** You don't need a full plugin structure—if you only have standalone `skills/*.md` or `agents/*.md` files without `.claude-plugin/plugin.json`, eval-bench will automatically create a temporary minimal plugin manifest for you.
 
@@ -83,7 +79,7 @@ sequenceDiagram
     participant eb as eb CLI
     participant prev as v1-baseline (snapshot)
     participant claude as claude CLI
-    participant judge as Judge (Ollama/Anthropic/OpenAI)
+    participant judge as Judge
     participant snap as wip (snapshot)
 
     You->>tree: edit your plugin
@@ -102,7 +98,7 @@ sequenceDiagram
     end
 
     eb->>snap: write baseline + current + summary
-    eb-->>You: baseline 4.20 / current 4.45 / delta +0.25
+    eb-->>You: baseline mean 4.20 (n=…) / current mean 4.45 (n=…) / delta +0.25
     You->>eb: eb view wip
     eb-->>You: side-by-side HTML
 ```
@@ -127,7 +123,7 @@ sequenceDiagram
     participant prev as v1-baseline (snapshot)
     participant claude as claude CLI
     participant judge as Judge
-    participant tmp as tempdir (/tmp/eb-ephemeral-…)
+    participant tmp as tempdir ($TMPDIR/eb-ephemeral-…)
 
     You->>prompts: edit one prompt + rubric
     You->>eb: eb run --baseline-from v1-baseline --only id --no-save
@@ -148,7 +144,7 @@ sequenceDiagram
 
     Note over You: Read rationale or open view.html. Fix skill or rubric. Run again.
     You->>eb: same command, again
-    Note over eb,tmp: Fresh tempdir each run. OS reclaims /tmp on reboot.
+    Note over eb,tmp: Fresh tempdir each run. OS reclaims $TMPDIR on reboot (Linux /tmp; macOS /var/folders).
 ```
 
 ```bash
