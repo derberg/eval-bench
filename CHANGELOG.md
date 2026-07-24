@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.22.0 — 2026-07-24
+
+**Features:**
+
+- **The `claude-cli` judge now runs from a neutral temp cwd instead of inheriting the caller's.** Inheriting the cwd started the judge session inside the benchmarked repo, where project context leaked into the call — most destructively Stop hooks from installed plugins, which fire after the verdict and replace the final message, so stdout became hook prose instead of the JSON verdict and every judgment failed with "could not parse JSON". The judge subprocess now gets a fresh non-git temp dir (`eb-judge-*`), removed after the call, keeping it a pure {prompt, output, rubric} scorer.
+
 ## 0.16.4 — 2026-05-13
 
 **Bug fixes:**
