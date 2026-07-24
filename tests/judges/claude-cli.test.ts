@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { chmodSync } from 'node:fs';
+import { chmodSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { judgeWithClaudeCli } from '../../src/judges/claude-cli.js';
 
@@ -50,6 +50,26 @@ describe('judgeWithClaudeCli', () => {
         rubric: 'r',
       }),
     ).rejects.toThrow(/exit 7/);
+  });
+
+  it('runs the judge from a neutral temp cwd, not the caller cwd', async () => {
+    // Inheriting the caller's cwd puts the judge session inside the
+    // benchmarked repo, where project context (e.g. plugin Stop hooks) can
+    // replace the judge's final message and destroy the JSON verdict.
+    const cwdJudge = resolve('tests/fixtures/fake-claude-judge-cwd.js');
+    chmodSync(cwdJudge, 0o755);
+    const r = await judgeWithClaudeCli({
+      command: 'node',
+      extraArgs: [cwdJudge],
+      model: null,
+      timeoutMs: 5000,
+      prompt: 'p',
+      output: 'o',
+      rubric: 'r',
+    });
+    expect(r.rationale).not.toBe(process.cwd());
+    expect(r.rationale).toContain('eb-judge-');
+    expect(existsSync(r.rationale)).toBe(false); // temp cwd is removed afterwards
   });
 
   it('does not pipe stdin to the judge process — child sees EOF immediately', async () => {
