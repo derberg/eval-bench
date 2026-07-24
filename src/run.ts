@@ -533,7 +533,10 @@ async function runAndJudge(
   });
   // claudeCwd: fresh isolated temp dir for this sample only. Claude runs here
   // so it cannot navigate to sibling sample dirs inside the snapshot tree.
-  const claudeCwd = await mkdtemp(join(tmpdir(), 'eb-run-'));
+  // When provider.cwd is explicitly null (artifactCwd null), the legacy
+  // contract applies instead: the provider inherits this process's cwd, so
+  // relative commands/args keep resolving against it.
+  const claudeCwd = artifactCwd === null ? null : await mkdtemp(join(tmpdir(), 'eb-run-'));
 
   // Snapshot git state before Claude runs so we can revert only the files
   // Claude touched — preserving any user-owned uncommitted changes.
@@ -585,7 +588,7 @@ async function runAndJudge(
         const snapshotDir = realpathSync(resolvePath(opts.config.snapshots.dir, opts.name));
         transcriptFile = relative(snapshotDir, tPath);
       }
-      if (outputDir) {
+      if (outputDir && claudeCwd) {
         // Copy relative-path writes (landed in claudeCwd) into output/.
         await copyDirToOutput(claudeCwd, outputDir).catch(() => {});
         // Save absolute-path writes to pluginDir into output/ before git cleanup.
@@ -626,14 +629,22 @@ async function runAndJudge(
     return { run, judgment };
   } finally {
     // Delete the isolated claudeCwd — artifacts already saved to artifactCwd.
-    await rm(claudeCwd, { recursive: true, force: true }).catch(() => {});
+    // In legacy mode (claudeCwd null) the provider ran in this process's cwd,
+    // which must never be deleted.
+    if (claudeCwd) {
+      await rm(claudeCwd, { recursive: true, force: true }).catch(() => {});
+    }
     // Revert what Claude wrote to the plugin dir so the next sample starts clean.
     if (absolutePluginDir) {
       await resetClaudeWrites(absolutePluginDir, beforeGitStatus).catch(() => {});
     }
     // Revert any writes Claude made to locations outside both claudeCwd and
-    // pluginDir (e.g. writing to an unrelated repo or /tmp path).
-    await undoExternalWrites(lastToolCalls, claudeCwd, absolutePluginDir).catch(() => {});
+    // pluginDir (e.g. writing to an unrelated repo or /tmp path). In legacy
+    // mode the provider's working area is this process's cwd — treat it as
+    // the cwd so its own relative-area writes are not reverted.
+    await undoExternalWrites(lastToolCalls, claudeCwd ?? process.cwd(), absolutePluginDir).catch(
+      () => {},
+    );
   }
 }
 
