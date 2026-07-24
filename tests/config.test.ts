@@ -22,7 +22,7 @@ judge:
     const cfg = loadConfig(path);
     expect(cfg.plugin.path).toBe('./');
     expect(cfg.runs.samples).toBe(3);
-    expect(cfg.runs.parallel).toBe(2);
+    expect(cfg.runs.parallel).toBe(1);
     expect(cfg.judge.temperature).toBe(0);
     expect(cfg.snapshots.dir).toBe('./.eval-bench/snapshots');
   });

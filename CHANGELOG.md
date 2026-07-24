@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.22.1 — 2026-07-24
+
+**Bug fixes:**
+
+- **`provider.cwd: null` again inherits the parent process cwd (legacy contract).** The 0.20.7 per-sample isolation change made every provider run spawn in a fresh temp dir unconditionally, silently breaking the documented `cwd: null` opt-out — relative provider commands/args (like the e2e toy plugin's `fake-claude.js`) stopped resolving. `runRow` now skips the isolated temp dir when `provider.cwd` is null and lets the subprocess inherit eval-bench's cwd.
+
+**Internal:**
+
+- **Test suite is green again (broken since 0.20.7-era releases).** Realigned tests that still encoded pre-0.20.x contracts: the default `runs.parallel` is 1 (changed deliberately when parallel defaulted down), ephemeral `--no-save` runs print `▸ Folder/Snapshot/View` links (not the old `Outputs:` line), and the per-sample cwd test now asserts the isolation contract (provider runs in an `eb-run-*` temp dir, artifacts copied to `<sample dir>/output/`). Also gave the 3×`runBenchmark` matrix-built test an explicit 30s timeout — it flaked at the 5s default under full-suite parallel load.
+
 ## 0.22.0 — 2026-07-24
 
 **Features:**

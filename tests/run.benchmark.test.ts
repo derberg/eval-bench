@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { chmodSync, existsSync, mkdtempSync, realpathSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createServer, type Server } from 'node:http';
@@ -39,8 +39,10 @@ afterAll(async () => {
 
 const fakeClaude = resolve('tests/fixtures/fake-claude.js');
 const fakeClaudeCwd = resolve('tests/fixtures/fake-claude-cwd.js');
+const fakeClaudeEchoCwd = resolve('tests/fixtures/fake-claude-echo-cwd.js');
 chmodSync(fakeClaude, 0o755);
 chmodSync(fakeClaudeCwd, 0o755);
+chmodSync(fakeClaudeEchoCwd, 0o755);
 
 const prompts: PromptSpec[] = [{ id: 'p1', prompt: 'x', rubric: 'r' }];
 
@@ -208,7 +210,9 @@ describe('runBenchmark', () => {
       },
     });
     expect(resumeEvent).toEqual({ freshRows: 0, reJudgeRows: 4 });
-  });
+    // Three full runBenchmark calls (12 subprocess spawns) — comfortably over
+    // the 5s default when the whole suite runs in parallel workers.
+  }, 30_000);
 
   it('checkpoints partial state after each row', async () => {
     judgeMode = 'ok';
@@ -255,19 +259,20 @@ describe('runBenchmark', () => {
       name: 'wip',
     });
     expect(snap.runs).toHaveLength(2);
-    // Recorded cwd is canonical (realpath-resolved); compare against the
-    // realpath of the snapshots root so macOS symlinks don't trip the test.
-    const canonicalSnapsRoot = realpathSync(snapsRoot);
     for (const r of snap.runs) {
       expect(r.cwd).not.toBeNull();
-      // Every cwd lives under the per-snapshot subdir, namespaced by
-      // variant/prompt/sample.
-      expect(r.cwd!.startsWith(`${canonicalSnapsRoot}/wip/`)).toBe(true);
+      // Recorded cwd is the per-sample artifact dir inside the snapshot
+      // tree, namespaced by variant/prompt/sample. It is resolved lexically
+      // from the template, so compare against snapsRoot as given.
+      expect(r.cwd!.startsWith(`${snapsRoot}/wip/`)).toBe(true);
       expect(r.cwd).toContain(`/${r.variant}/${r.promptId}/${r.sample}`);
-      // Provider actually ran there; the fake-claude-cwd fixture writes a
-      // marker file at process.cwd() and echoes it.
-      expect(existsSync(join(r.cwd!, 'artifact.txt'))).toBe(true);
-      expect(r.output).toContain(`[CWD=${r.cwd}]`);
+      // The provider itself runs in an isolated eb-run-* temp dir (so it
+      // cannot navigate to sibling samples in the snapshot tree); the
+      // fake-claude-cwd fixture echoes that cwd and writes a marker file
+      // there, which runBenchmark copies into <artifact dir>/output/.
+      expect(r.output).toMatch(/\[CWD=.*eb-run-/);
+      expect(r.output).not.toContain(`[CWD=${r.cwd}]`);
+      expect(existsSync(join(r.cwd!, 'output', 'artifact.txt'))).toBe(true);
     }
     // Baseline and current land in distinct dirs thanks to {{variant}}.
     const cwds = new Set(snap.runs.map((r) => r.cwd));
@@ -276,8 +281,10 @@ describe('runBenchmark', () => {
 
   it('opts out of the per-sample cwd when provider.cwd is null (legacy behavior)', async () => {
     judgeMode = 'ok';
+    const cfg = baseConfig();
+    cfg.provider.extraArgs = [fakeClaudeEchoCwd];
     const snap = await runBenchmark({
-      config: baseConfig(),
+      config: cfg,
       prompts,
       baselinePluginDir: '/tmp/a',
       currentPluginDir: '/tmp/b',
@@ -288,6 +295,12 @@ describe('runBenchmark', () => {
       name: 'test-no-cwd',
     });
     expect(snap.runs.every((r) => r.cwd === null)).toBe(true);
+    // Legacy contract (types.ts): cwd null means the provider inherits the
+    // parent process cwd — relative provider commands/args must resolve
+    // against it (the e2e toy plugin relies on this).
+    for (const r of snap.runs) {
+      expect(r.output).toContain(`[CWD=${process.cwd()}]`);
+    }
   });
 
   it('skips already-completed rows when resuming', async () => {

@@ -87,13 +87,13 @@ describe('eb run --no-save', () => {
       { cwd: repo, reject: false },
     );
     expect(exitCode).toBe(0);
-    // The CLI must print the snapshot dir, the view.html path, and the
-    // copy-pasteable `view --snapshot-dir` form. Without these the user
-    // can't get to the actual model outputs — which was the whole point of
-    // keeping the tempdir.
-    const tempPathMatch = stdout.match(/Outputs:\s+(\S+)\//);
-    expect(tempPathMatch, `expected stdout to print 'Outputs: <path>/' — got:\n${stdout}`).not.toBeNull();
-    const snapshotDir = tempPathMatch![1];
+    // The CLI must print the snapshot dir (Folder link), the view.html path,
+    // and the copy-pasteable `view --snapshot-dir` form. Without these the
+    // user can't get to the actual model outputs — which was the whole point
+    // of keeping the tempdir.
+    const folderMatch = stdout.match(/Folder:\s+file:\/\/(\S+)/);
+    expect(folderMatch, `expected stdout to print 'Folder: file://<path>' — got:\n${stdout}`).not.toBeNull();
+    const snapshotDir = folderMatch![1];
     expect(stdout).toMatch(/View HTML:\s+\S+\/view\.html/);
     expect(stdout).toMatch(/eval-bench view \S+ --snapshot-dir \S+/);
     // The promised paths must actually exist after the run — pre-fix, they
@@ -112,16 +112,13 @@ describe('eb run --no-save', () => {
       { cwd: repo, reject: false },
     );
     expect(run.exitCode).toBe(0);
-    const tempPathMatch = run.stdout.match(/Outputs:\s+(\S+?)\/[^/\s]+\/$/m)
-      ?? run.stdout.match(/Outputs:\s+(\S+)\/[^/\s]+\//);
-    expect(tempPathMatch, `expected stdout to print Outputs path — got:\n${run.stdout}`).not.toBeNull();
-    // The "Outputs: <root>/<name>/" line — strip the trailing /<name>/ to
-    // get the snapshots root.
-    const snapshotsRoot = tempPathMatch![1];
+    // The "View CLI: eval-bench view <name> --snapshot-dir <root>" line
+    // carries both the snapshot name and the ephemeral snapshots root.
     const nameMatch = run.stdout.match(/eval-bench view (\S+) --snapshot-dir (\S+)/);
-    expect(nameMatch).not.toBeNull();
+    expect(nameMatch, `expected stdout to print the view CLI hint — got:\n${run.stdout}`).not.toBeNull();
     const name = nameMatch![1];
     const printedDir = nameMatch![2];
+    const snapshotsRoot = printedDir;
 
     // Now invoke `view <name> --snapshot-dir <printedDir>` — should succeed
     // without needing the configured snapshots.dir to contain anything.
