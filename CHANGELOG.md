@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.23.0 — 2026-07-27
+
+**Bug fixes (behavior change):**
+
+- **The benchmarked plugin is now actually loaded into the claude session via `--plugin-dir`.** Previously the plugin path was only exported as `EVAL_BENCH_PLUGIN_DIR`, an env var the real claude CLI ignores — so skills and agents resolved to whatever same-named plugin was installed globally from a marketplace (`~/.claude/plugins/cache/...`), and working-tree edits were silently never exercised; the run header's "local plugin" claim was decorative. With `--plugin-dir`, the local plugin loads for the session and shadows a same-named installed plugin (verified against Claude Code skill resolution). Runs benchmarking a plugin that is also installed globally may report different (now honest) results. `EVAL_BENCH_PLUGIN_DIR` stays exported for mock providers and tests.
+
 ## 0.22.1 — 2026-07-24
 
 **Bug fixes:**
