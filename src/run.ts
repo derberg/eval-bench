@@ -59,6 +59,25 @@ export interface MatrixRow {
   sample: number;
 }
 
+// A resumed snapshot may cover more prompts than this run's (possibly
+// --only-filtered) matrix. Preserve the existing prompt list, updating the
+// definitions of the prompts this run actually executed and appending any new
+// ones — otherwise a filtered --refresh / --retry-failed / --rejudge clobbers
+// the snapshot's prompt list and the HTML view renders only the filtered
+// subset even though runs/judgments still hold every row.
+export function mergePrompts(
+  existing: PromptSpec[] | undefined,
+  ran: PromptSpec[],
+): PromptSpec[] {
+  if (!existing?.length) return ran;
+  const ranById = new Map(ran.map((p) => [p.id, p]));
+  const have = new Set(existing.map((p) => p.id));
+  return [
+    ...existing.map((p) => ranById.get(p.id) ?? p),
+    ...ran.filter((p) => !have.has(p.id)),
+  ];
+}
+
 export function expandMatrix(
   prompts: PromptSpec[],
   samples: number,
@@ -197,7 +216,7 @@ function buildSnapshot(
     },
     config: opts.config,
     judge: { provider: opts.config.judge.provider, model: opts.config.judge.model },
-    prompts: opts.prompts,
+    prompts: mergePrompts(opts.resume?.prompts, opts.prompts),
     runs,
     judgments,
     summary: {

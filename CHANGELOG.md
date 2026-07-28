@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.25.0 — 2026-07-28
+
+**Bug fixes:**
+
+- **A filtered `--refresh` / `--retry-failed` / `--rejudge` no longer clobbers the snapshot's prompt list.** `runBenchmark` wrote `prompts:` from the run's (possibly `--only`-filtered) matrix, so refreshing one prompt left a snapshot whose `prompts` array contained only that prompt — the HTML view then rendered a single prompt section even though `runs`/`judgments` still held every row. The saved snapshot now merges the resumed snapshot's prompt list with the run's: refreshed prompts get their updated definitions, untouched prompts keep theirs, new prompts are appended.
+
+**Behavior change (scaffold default):**
+
+- **`eb init` scaffolds session isolation by default**: `provider.extraArgs: ["--setting-sources", "project"]`. Without it the benchmarked session inherits the runner machine's entire global Claude Code environment (measured: 108 tools / 10 MCP servers vs 42 / 2 isolated) — ~10k extra initial-context tokens re-read every turn, runner-dependent results, and distractor tools leaking into outputs. Documented in docs/config.md; existing configs opt in by adding the flag.
+
 ## 0.24.0 — 2026-07-28
 
 **Features:**

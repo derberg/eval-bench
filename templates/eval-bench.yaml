@@ -8,6 +8,15 @@ provider:
   command: claude
   timeout: 800
   model: claude-opus-4-7
+  # Session isolation: without this, the benchmarked session inherits every
+  # plugin and MCP server installed on the machine running the eval — in one
+  # measured case 108 tools / 10 MCP servers instead of 42 / 2, adding ~10k
+  # initial-context tokens (re-read every turn, ~10-20% cost per run), making
+  # results depend on whose machine ran them, and leaking distractor tools
+  # into outputs. The plugin under test still loads (eval-bench passes it via
+  # --plugin-dir) and brings its own .mcp.json servers. Remove this only if
+  # your plugin genuinely depends on user-level settings.
+  extraArgs: ["--setting-sources", "project"]
   # Each Claude run gets its own working dir under the snapshot. By default
   # that's "{{snapshots_dir}}/{{snapshot_name}}/{{variant}}/{{prompt_id}}/{{sample}}",
   # so any files the model writes land alongside snapshot.json instead of in
