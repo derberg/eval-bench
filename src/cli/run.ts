@@ -34,6 +34,7 @@ export interface RunOptions {
   force?: boolean;
   retryFailed?: boolean;
   rejudge?: boolean;
+  refresh?: boolean;
   timeout?: number;
   promptInline?: boolean;
   noInteractive?: boolean;
@@ -81,6 +82,18 @@ export async function runCommand(opts: RunOptions): Promise<number> {
     err('--rejudge and --force are mutually exclusive');
     return 1;
   }
+  if (opts.refresh && opts.force) {
+    err('--refresh and --force are mutually exclusive');
+    return 1;
+  }
+  if (opts.refresh && opts.retryFailed) {
+    err('--refresh and --retry-failed are mutually exclusive');
+    return 1;
+  }
+  if (opts.refresh && opts.rejudge) {
+    err('--refresh and --rejudge are mutually exclusive');
+    return 1;
+  }
   if (opts.rejudge && opts.retryFailed) {
     err('--rejudge and --retry-failed are mutually exclusive');
     return 1;
@@ -101,6 +114,10 @@ export async function runCommand(opts: RunOptions): Promise<number> {
     }
     if (opts.rejudge) {
       err('--no-save and --rejudge are mutually exclusive (--rejudge needs an existing snapshot)');
+      return 1;
+    }
+    if (opts.refresh) {
+      err('--no-save and --refresh are mutually exclusive (--refresh needs an existing snapshot)');
       return 1;
     }
     if (opts.force) {
@@ -321,6 +338,25 @@ export async function runCommand(opts: RunOptions): Promise<number> {
       info(
         `Re-judging ${existing.runs.length} cached run${existing.runs.length === 1 ? '' : 's'} in snapshot "${name}" with ${cfg.judge.provider}/${cfg.judge.model}`,
       );
+    } else if (opts.refresh) {
+      // Drop the matrix prompts' current-variant rows (and their judgments) so
+      // the dedup re-executes them fresh; every other row — other prompts, and
+      // the baseline side — is preserved as-is. The summary is recomputed from
+      // the merged rows at save time.
+      const keptRuns = existing.runs.filter(
+        (r) => !(r.variant === 'current' && wantPromptIds.has(r.promptId)),
+      );
+      const dropped = existing.runs.length - keptRuns.length;
+      const keptIds = new Set(keptRuns.map((r) => r.id));
+      resume = {
+        ...existing,
+        runs: keptRuns,
+        judgments: existing.judgments.filter((j) => keptIds.has(j.runId)),
+        complete: false,
+      };
+      info(
+        `Refreshing ${dropped} current-variant run${dropped === 1 ? '' : 's'} (${prompts.length} prompt${prompts.length === 1 ? '' : 's'}) in snapshot "${name}" — ${keptRuns.length} rows preserved`,
+      );
     } else if (existing.complete === false) {
       resume = existing;
       info(
@@ -336,6 +372,9 @@ export async function runCommand(opts: RunOptions): Promise<number> {
     }
   } else if (opts.retryFailed) {
     err(`No snapshot named "${name}" — nothing to retry.`);
+    return 1;
+  } else if (opts.refresh) {
+    err(`No snapshot named "${name}" — nothing to refresh.`);
     return 1;
   }
 
