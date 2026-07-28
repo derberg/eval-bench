@@ -29,6 +29,15 @@ provider:
   cwd: "{{snapshots_dir}}/{{snapshot_name}}/{{variant}}/{{prompt_id}}/{{sample}}"  # default
 ```
 
+#### Session isolation — strongly recommended `extraArgs`
+
+```yaml
+provider:
+  extraArgs: ["--setting-sources", "project"]
+```
+
+Without it, the benchmarked session inherits the runner machine's entire global Claude Code environment — every user-installed plugin and MCP server. In one measured case that meant 108 tools / 10 MCP servers in context instead of 42 / 2: roughly 10k extra initial-context tokens re-read on every turn (~10–20% higher cost per run), scores that depend on whose machine ran the eval, and unrelated tools leaking into outputs (judges have docked points for stray "unrelated MCP servers" notes). With `--setting-sources project`, only built-ins, the plugin under test (loaded via `--plugin-dir`), and the plugin's own `.mcp.json` servers are present. The `eb init` scaffold sets this by default; remove it only if your plugin genuinely depends on user-level settings.
+
 #### `cwd` — per-sample working directory
 
 Each Claude invocation runs in its own directory so any files the model writes (`.likec4` diagrams, generated code, scratch outputs) land alongside `snapshot.json` instead of polluting your repo. The directory is created on first use, and the resolved path is recorded on every run in `snapshot.json` (`runs[].cwd`) so judges and post-hoc inspection can find the artifacts.

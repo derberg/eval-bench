@@ -107,6 +107,12 @@ describe('eb run --refresh', () => {
     expect(snap.runs).toHaveLength(8);
     expect(snap.judgments).toHaveLength(8);
     expect(snap.complete).toBe(true);
+    // The snapshot's prompt list must survive a filtered refresh — the view
+    // renders prompt sections from it. The refreshed prompt carries its
+    // updated definition; the untouched prompt keeps its original one.
+    expect(snap.prompts.map((p: { id: string }) => p.id).sort()).toEqual(['p1', 'p2']);
+    expect(snap.prompts.find((p: { id: string }) => p.id === 'p1').prompt).toBe('hello-one-CHANGED');
+    expect(snap.prompts.find((p: { id: string }) => p.id === 'p2').prompt).toBe('hello-two');
 
     const rows = new Map(snap.runs.map((r: { id: string; output: string }) => [r.id, r.output]));
     const seedRows = new Map(
