@@ -7,9 +7,11 @@ import { invokeClaude } from '../src/provider.js';
 const fakeClaude = resolve('tests/fixtures/fake-claude.js');
 const fakeClaudeJson = resolve('tests/fixtures/fake-claude-json.js');
 const fakeClaudeCwd = resolve('tests/fixtures/fake-claude-cwd.js');
+const fakeClaudePluginDir = resolve('tests/fixtures/fake-claude-plugin-dir.js');
 chmodSync(fakeClaude, 0o755);
 chmodSync(fakeClaudeJson, 0o755);
 chmodSync(fakeClaudeCwd, 0o755);
+chmodSync(fakeClaudePluginDir, 0o755);
 
 describe('invokeClaude', () => {
   it('captures stdout and succeeds with exit 0', async () => {
@@ -53,6 +55,22 @@ describe('invokeClaude', () => {
       cacheCreationInputTokens: 44,
       totalCostUsd: 0.0123,
     });
+  });
+
+  it('passes the plugin dir to the CLI via --plugin-dir (env var alone is invisible to claude)', async () => {
+    const r = await invokeClaude({
+      command: 'node',
+      extraArgs: [fakeClaudePluginDir],
+      prompt: 'hello plugin',
+      pluginDir: '/tmp/fake-plugin',
+      timeoutMs: 5000,
+      model: null,
+      allowedTools: null,
+      cwd: null,
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.output).toContain('[PLUGIN_DIR_FLAG=/tmp/fake-plugin]');
+    expect(r.output).toContain('hello plugin');
   });
 
   it('spawns the provider in opts.cwd, creating the directory if missing, and returns the canonical path', async () => {

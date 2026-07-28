@@ -291,7 +291,12 @@ export async function invokeClaude(opts: InvokeClaudeOptions): Promise<InvokeCla
   const formatArgs = userSpecifiedFormat ? [] : ['--output-format', 'stream-json', '--verbose'];
 
   try {
-    const args = [...opts.extraArgs, ...formatArgs, '-p', opts.prompt];
+    // --plugin-dir is what actually loads the benchmarked plugin into the
+    // claude session — and it shadows a same-named plugin installed globally
+    // from a marketplace. Without it, skills/agents silently resolve to the
+    // installed copy (~/.claude/plugins/cache/...), so working-tree edits are
+    // never exercised. EVAL_BENCH_PLUGIN_DIR stays exported for mock providers.
+    const args = [...opts.extraArgs, ...formatArgs, '--plugin-dir', effectivePluginDir, '-p', opts.prompt];
     if (opts.model) {
       args.push('--model', opts.model);
     }
