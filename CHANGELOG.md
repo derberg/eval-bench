@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.24.0 — 2026-07-28
+
+**Features:**
+
+- **`--refresh`: re-run selected prompts fresh inside an existing snapshot.** `eb run --save-as <name> --refresh --only <ids>` drops the matrix prompts' current-variant rows (and their judgments) from the snapshot and re-executes them, preserving every other row — other prompts, and the baseline side — untouched; the summary is recomputed from the merged rows. This is the row-level correction primitive the snapshot model was missing: previously the only options were `--force` (which rebuilds the snapshot from the filtered matrix, silently dropping every unfiltered prompt) or `--rejudge` (all-or-nothing: strips every judgment, and combined with `--only` loses the unfiltered prompts' judgments). Typical use: a judge deduction that looks like a false positive — re-run that one prompt from scratch and let the fresh rows become the snapshot's datapoint, no hand-splicing of snapshot.json. Mutually exclusive with `--force`, `--retry-failed`, `--rejudge`, and `--no-save`.
+
 ## 0.23.0 — 2026-07-27
 
 **Bug fixes (behavior change):**

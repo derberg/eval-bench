@@ -54,6 +54,10 @@ program
   .option('--retry-failed', 'Re-run only failed rows in the existing snapshot (preserves successes)')
   .option('--rejudge', 'Re-judge all cached runs with the configured judge — keeps Claude outputs, drops existing judgments')
   .option(
+    '--refresh',
+    'Re-run the matrix prompts fresh in the existing --save-as snapshot (compose with --only), preserving every other row and judgment',
+  )
+  .option(
     '--prompt-inline',
     'Read a single prompt + rubric interactively from the terminal instead of loading prompts.yaml. Implies --no-save unless --save-as is given. Runs the current side only.',
   )
@@ -87,6 +91,7 @@ program
       force: Boolean(opts.force),
       retryFailed: Boolean(opts.retryFailed),
       rejudge: Boolean(opts.rejudge),
+      refresh: Boolean(opts.refresh),
       promptInline: Boolean(opts.promptInline),
       noInteractive: opts.tty === false,
       dryRun: opts.dryRun,
