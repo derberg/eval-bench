@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import { execa } from 'execa';
-import { mkdtempSync, writeFileSync, chmodSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, chmodSync, cpSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { readFile } from 'node:fs/promises';
@@ -200,7 +200,25 @@ describe('eb run --rejudge', () => {
     expect(out('p1::baseline::2')).toBe(both);
     expect(out('p1::current::1')).toBe('Own current answer.');
     expect(out('p1::current::2')).toBe(both);
-  }, 90_000);
+
+    // Rejudging with a different source must not swap in that snapshot's
+    // answers: the copied rows' cwd names `ref`, so `other` is never read.
+    cpSync(join(repo, 'snaps', 'ref'), join(repo, 'snaps', 'other'), { recursive: true });
+    for (const n of ['1', '2'])
+      writeFileSync(
+        join(repo, 'snaps', 'other', 'current', 'p1', n, 'transcript.jsonl'),
+        JSON.stringify({ type: 'result', result: 'Wrong source.', total_cost_usd: 0.1, usage: {} }) + '\n',
+      );
+    const wrong = await execa(
+      'npx',
+      ['tsx', cliPath, 'run', '--baseline-from', 'other', '--save-as', 'drift', '--rejudge', ...sharedArgs],
+      { cwd: repo, reject: false },
+    );
+    expect(wrong.exitCode).toBe(0);
+    expect(wrong.stdout + wrong.stderr).toMatch(/2 runs not re-read/);
+    const wrongSnap = JSON.parse(await readFile(snapPath, 'utf8'));
+    expect(wrongSnap.runs.map((r: { output: string }) => r.output)).not.toContain('Wrong source.');
+  }, 120_000);
 
   it('rejects --rejudge with --force', async () => {
     const repo = await makeRepo();

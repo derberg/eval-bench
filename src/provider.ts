@@ -61,7 +61,13 @@ export function parseStreamJson(stdout: string): {
   // returned) emits one result event per segment. The user sees every answer,
   // so the judge gets all of them, in order.
   const outputs: string[] = [];
-  let lastAssistantText: string | null = null;
+  // Last main-agent text per segment. Each segment opens with a top-level
+  // system/init event, and the result events often all arrive together at the
+  // end of stdout, so the k-th result pairs with the k-th segment rather than
+  // with whatever text came just before it.
+  const segmentTexts: (string | null)[] = [];
+  let resultCount = 0;
+  let sawStringResult = false;
   let sawUsage = false;
   const usage: RunUsage = {
     inputTokens: 0,
@@ -79,6 +85,11 @@ export function parseStreamJson(stdout: string): {
       continue;
     }
     if (typeof ev.type !== 'string') continue;
+    // Subagent events carry the Task call's id; only the main agent's text is
+    // the answer the user sees.
+    const isMainAgent = ev.parent_tool_use_id === undefined || ev.parent_tool_use_id === null;
+
+    if (ev.type === 'system' && ev.subtype === 'init' && isMainAgent) segmentTexts.push(null);
 
     if (ev.type === 'assistant') {
       const msg = ev.message as { content?: unknown[] } | undefined;
@@ -94,20 +105,32 @@ export function parseStreamJson(stdout: string): {
                 : {},
           });
         }
-        if (b.type === 'text' && typeof b.text === 'string' && b.text.trim().length > 0) {
-          lastAssistantText = b.text;
+        if (
+          isMainAgent &&
+          b.type === 'text' &&
+          typeof b.text === 'string' &&
+          b.text.trim().length > 0
+        ) {
+          if (segmentTexts.length === 0) segmentTexts.push(null);
+          segmentTexts[segmentTexts.length - 1] = b.text;
         }
       }
     }
 
-    if (ev.type === 'result' && typeof ev.result === 'string') {
-      // When the agent's last action is a tool call (e.g. a TodoWrite cleanup),
-      // the result event has an empty string even though the real answer was in
-      // the preceding assistant text block. Fall back to that text so the run
-      // isn't silently scored as zero.
-      const segment = ev.result === '' && lastAssistantText !== null ? lastAssistantText : ev.result;
-      if (segment !== '') outputs.push(segment);
-      lastAssistantText = null;
+    if (ev.type === 'result') {
+      const segmentText = segmentTexts[resultCount] ?? null;
+      resultCount += 1;
+      if (typeof ev.result === 'string') {
+        sawStringResult = true;
+        // When the agent's last action is a tool call (e.g. a TodoWrite cleanup),
+        // the result event has an empty string even though the real answer was in
+        // that segment's last assistant text block. Fall back to that text so the
+        // run isn't silently scored as zero.
+        const segment = ev.result === '' && segmentText !== null ? segmentText : ev.result;
+        if (segment !== '') outputs.push(segment);
+      }
+      // Count usage for every result event, error results included, so a
+      // segment that ends in an error still adds its tokens and cost.
       const u = ev.usage as Record<string, unknown> | undefined;
       if (u) {
         // Token counts are per segment and add up; total_cost_usd is
@@ -122,7 +145,9 @@ export function parseStreamJson(stdout: string): {
     }
   }
 
-  if (!sawUsage) return null;
+  // No string result at all means no answer to judge (plain-text output, or a
+  // session that only errored): let the caller fall back to raw stdout.
+  if (!sawUsage || !sawStringResult) return null;
   return { output: outputs.join('\n\n'), usage, toolCalls };
 }
 
