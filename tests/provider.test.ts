@@ -8,6 +8,7 @@ const fakeClaude = resolve('tests/fixtures/fake-claude.js');
 const fakeClaudeJson = resolve('tests/fixtures/fake-claude-json.js');
 const fakeClaudeCwd = resolve('tests/fixtures/fake-claude-cwd.js');
 const fakeClaudePluginDir = resolve('tests/fixtures/fake-claude-plugin-dir.js');
+const fakeClaudeMultiResult = resolve('tests/fixtures/fake-claude-multi-result.js');
 chmodSync(fakeClaude, 0o755);
 chmodSync(fakeClaudeJson, 0o755);
 chmodSync(fakeClaudeCwd, 0o755);
@@ -55,6 +56,32 @@ describe('invokeClaude', () => {
       cacheCreationInputTokens: 44,
       totalCostUsd: 0.0123,
     });
+  });
+
+  it('keeps every answer when the session resumes and emits several result events', async () => {
+    const r = await invokeClaude({
+      command: 'node',
+      extraArgs: [fakeClaudeMultiResult],
+      prompt: 'x',
+      pluginDir: '/tmp/fake-plugin',
+      timeoutMs: 5000,
+      model: null,
+      allowedTools: null,
+      cwd: null,
+    });
+    expect(r.exitCode).toBe(0);
+    // The judge must see what the user saw: both answers, in order. The empty
+    // second result falls back to that segment's own assistant text.
+    expect(r.output).toBe('First answer.\n\nFollow-up after the subagent returned.');
+    // Tokens are per segment, so they add up; cost is cumulative, so the last wins.
+    expect(r.usage).toEqual({
+      inputTokens: 3,
+      outputTokens: 30,
+      cacheReadInputTokens: 300,
+      cacheCreationInputTokens: 3000,
+      totalCostUsd: 0.8,
+    });
+    expect(r.toolCalls).toEqual([{ tool: 'TodoWrite', input: {} }]);
   });
 
   it('passes the plugin dir to the CLI via --plugin-dir (env var alone is invisible to claude)', async () => {

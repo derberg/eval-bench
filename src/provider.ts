@@ -48,7 +48,7 @@ function num(x: unknown): number {
 // Also handles `--output-format json` single-object output since it shares
 // the same {type:"result", result, usage} shape on a single line.
 // Returns null if no result event is found (plain-text provider output).
-function parseStreamJson(stdout: string): {
+export function parseStreamJson(stdout: string): {
   output: string;
   usage: RunUsage;
   toolCalls: ToolCall[];
@@ -57,9 +57,19 @@ function parseStreamJson(stdout: string): {
   if (lines.length === 0) return null;
 
   const toolCalls: ToolCall[] = [];
-  let output: string | null = null;
+  // A session that resumes after answering (e.g. a background subagent
+  // returned) emits one result event per segment. The user sees every answer,
+  // so the judge gets all of them, in order.
+  const outputs: string[] = [];
   let lastAssistantText: string | null = null;
-  let usage: RunUsage | null = null;
+  let sawUsage = false;
+  const usage: RunUsage = {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadInputTokens: 0,
+    cacheCreationInputTokens: 0,
+    totalCostUsd: 0,
+  };
 
   for (const line of lines) {
     let ev: Record<string, unknown>;
@@ -91,29 +101,29 @@ function parseStreamJson(stdout: string): {
     }
 
     if (ev.type === 'result' && typeof ev.result === 'string') {
-      output = ev.result;
+      // When the agent's last action is a tool call (e.g. a TodoWrite cleanup),
+      // the result event has an empty string even though the real answer was in
+      // the preceding assistant text block. Fall back to that text so the run
+      // isn't silently scored as zero.
+      const segment = ev.result === '' && lastAssistantText !== null ? lastAssistantText : ev.result;
+      if (segment !== '') outputs.push(segment);
+      lastAssistantText = null;
       const u = ev.usage as Record<string, unknown> | undefined;
       if (u) {
-        usage = {
-          inputTokens: num(u.input_tokens),
-          outputTokens: num(u.output_tokens),
-          cacheReadInputTokens: num(u.cache_read_input_tokens),
-          cacheCreationInputTokens: num(u.cache_creation_input_tokens),
-          totalCostUsd: num(ev.total_cost_usd),
-        };
+        // Token counts are per segment and add up; total_cost_usd is
+        // cumulative, so the highest value is the session total.
+        sawUsage = true;
+        usage.inputTokens += num(u.input_tokens);
+        usage.outputTokens += num(u.output_tokens);
+        usage.cacheReadInputTokens += num(u.cache_read_input_tokens);
+        usage.cacheCreationInputTokens += num(u.cache_creation_input_tokens);
+        usage.totalCostUsd = Math.max(usage.totalCostUsd, num(ev.total_cost_usd));
       }
     }
   }
 
-  if (output === null || usage === null) return null;
-  // When the agent's last action is a tool call (e.g. a TodoWrite cleanup),
-  // the result event has an empty string even though the real answer was in
-  // the preceding assistant text block. Fall back to that text so the run
-  // isn't silently scored as zero.
-  if (output === '' && lastAssistantText !== null) {
-    output = lastAssistantText;
-  }
-  return { output, usage, toolCalls };
+  if (!sawUsage) return null;
+  return { output: outputs.join('\n\n'), usage, toolCalls };
 }
 
 async function exists(path: string): Promise<boolean> {

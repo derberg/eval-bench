@@ -9,7 +9,8 @@ import { initDebug, noopDebug, type DebugLogger } from '../debug.js';
 import { readInlinePrompt } from './prompt-inline.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { validateJudgeTemplate } from '../judges/rubric.js';
-import { describePlugin } from '../provider.js';
+import { describePlugin, parseStreamJson } from '../provider.js';
+import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Config, PromptSpec, Snapshot, RunResult, Judgment, Variant } from '../types.js';
@@ -63,6 +64,44 @@ function applyOverrides(cfg: Config, opts: RunOptions): Config {
     cfg.plugin.gitRoot = opts.plugin;
   }
   return cfg;
+}
+
+// Re-parses each run's saved transcript.jsonl into output/usage/toolCalls.
+// transcriptFile is relative to the snapshot that executed the run, and rows
+// copied in by --baseline-from / --current-from keep the source's path
+// (a copied baseline row points at `current/...`), so those resolve against
+// the source snapshot. A run whose transcript can't be located or parsed
+// keeps its stored values.
+async function rereadFromTranscripts(
+  runs: RunResult[],
+  dirs: { snapshotDir: string; baselineFromDir: string | null; currentFromDir: string | null },
+): Promise<{ runs: RunResult[]; changed: number }> {
+  let changed = 0;
+  const out = await Promise.all(
+    runs.map(async (r) => {
+      if (!r.transcriptFile || r.error !== null) return r;
+      let dir: string | null = null;
+      const ownPath = join(r.variant, r.promptId, String(r.sample), 'transcript.jsonl');
+      const sourcePath = join('current', r.promptId, String(r.sample), 'transcript.jsonl');
+      if (r.variant === 'current' && dirs.currentFromDir && r.transcriptFile === sourcePath)
+        dir = dirs.currentFromDir;
+      else if (r.variant === 'baseline' && dirs.baselineFromDir && r.transcriptFile === sourcePath)
+        dir = dirs.baselineFromDir;
+      else if (r.transcriptFile === ownPath) dir = dirs.snapshotDir;
+      if (!dir) return r;
+      let raw: string;
+      try {
+        raw = await readFile(join(dir, r.transcriptFile), 'utf8');
+      } catch {
+        return r;
+      }
+      const parsed = parseStreamJson(raw);
+      if (!parsed || parsed.output.length === 0) return r;
+      if (parsed.output !== r.output) changed += 1;
+      return { ...r, output: parsed.output, usage: parsed.usage, toolCalls: parsed.toolCalls };
+    }),
+  );
+  return { runs: out, changed };
 }
 
 export async function runCommand(opts: RunOptions): Promise<number> {
@@ -334,7 +373,18 @@ export async function runCommand(opts: RunOptions): Promise<number> {
         err(`Snapshot "${name}" has no cached runs to re-judge.`);
         return 1;
       }
-      resume = { ...existing, judgments: [], complete: false };
+      // Re-read each run's output from its saved transcript so a parser fix
+      // reaches cached runs too; the stored output may predate it.
+      const reread = await rereadFromTranscripts(existing.runs, {
+        snapshotDir: join(cfg.snapshots.dir, name),
+        baselineFromDir: opts.baselineFrom ? join(cfg.snapshots.dir, opts.baselineFrom) : null,
+        currentFromDir: opts.currentFrom ? join(cfg.snapshots.dir, opts.currentFrom) : null,
+      });
+      resume = { ...existing, runs: reread.runs, judgments: [], complete: false };
+      if (reread.changed > 0)
+        info(
+          `Re-read ${reread.changed} run output${reread.changed === 1 ? '' : 's'} from saved transcripts`,
+        );
       info(
         `Re-judging ${existing.runs.length} cached run${existing.runs.length === 1 ? '' : 's'} in snapshot "${name}" with ${cfg.judge.provider}/${cfg.judge.model}`,
       );

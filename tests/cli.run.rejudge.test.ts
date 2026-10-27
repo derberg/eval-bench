@@ -148,6 +148,60 @@ describe('eb run --rejudge', () => {
     expect(mergedSnap.judgments.every((j: { score: number }) => j.score === 2)).toBe(true);
   }, 60_000);
 
+  it('re-reads outputs from saved transcripts, resolving copied baseline rows against their source snapshot', async () => {
+    const repo = await makeRepo();
+    // Swap in a stream-json provider so runs save a transcript.jsonl.
+    const multi = resolve('tests/fixtures/fake-claude-multi-result.js');
+    chmodSync(multi, 0o755);
+    const cfgPath = join(repo, 'eval-bench.yaml');
+    writeFileSync(
+      cfgPath,
+      (await readFile(cfgPath, 'utf8')).replace(resolve('tests/fixtures/fake-claude.js'), multi),
+    );
+    // The plugin path is the repo root, so the post-run cleanup would revert
+    // the untracked snaps/ transcripts as plugin-dir writes. Ignore it.
+    writeFileSync(join(repo, '.gitignore'), 'snaps/\n');
+    judgeScore = 4;
+    const seedRef = await execa('npx', ['tsx', cliPath, 'eval', '--save-as', 'ref', ...sharedArgs], {
+      cwd: repo,
+      reject: false,
+    });
+    expect(seedRef.exitCode).toBe(0);
+    const seedDrift = await execa(
+      'npx',
+      ['tsx', cliPath, 'run', '--baseline-from', 'ref', '--save-as', 'drift', ...sharedArgs],
+      { cwd: repo, reject: false },
+    );
+    expect(seedDrift.exitCode).toBe(0);
+
+    // Simulate outputs stored by an older parser, and give this snapshot's own
+    // current/p1/1 transcript distinct content. Copied baseline rows also point
+    // at current/p1/<n>, so resolving them here would pick up the wrong answer.
+    const snapPath = join(repo, 'snaps', 'drift', 'snapshot.json');
+    const snap = JSON.parse(await readFile(snapPath, 'utf8'));
+    for (const r of snap.runs) r.output = 'stale';
+    writeFileSync(snapPath, JSON.stringify(snap));
+    writeFileSync(
+      join(repo, 'snaps', 'drift', 'current', 'p1', '1', 'transcript.jsonl'),
+      JSON.stringify({ type: 'result', result: 'Own current answer.', total_cost_usd: 0.1, usage: {} }) + '\n',
+    );
+
+    const { exitCode, stdout } = await execa(
+      'npx',
+      ['tsx', cliPath, 'run', '--baseline-from', 'ref', '--save-as', 'drift', '--rejudge', ...sharedArgs],
+      { cwd: repo, reject: false },
+    );
+    expect(exitCode).toBe(0);
+    expect(stdout).toMatch(/Re-read 4 run outputs from saved transcripts/);
+    const reSnap = JSON.parse(await readFile(snapPath, 'utf8'));
+    const out = (id: string) => reSnap.runs.find((r: { id: string }) => r.id === id).output;
+    const both = 'First answer.\n\nFollow-up after the subagent returned.';
+    expect(out('p1::baseline::1')).toBe(both);
+    expect(out('p1::baseline::2')).toBe(both);
+    expect(out('p1::current::1')).toBe('Own current answer.');
+    expect(out('p1::current::2')).toBe(both);
+  }, 90_000);
+
   it('rejects --rejudge with --force', async () => {
     const repo = await makeRepo();
     const { exitCode, stderr, stdout } = await execa(

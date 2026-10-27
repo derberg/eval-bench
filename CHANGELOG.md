@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.26.0 — 2026-10-27
+
+**Bug fixes (behavior change):**
+
+- **The judge now sees every answer of a session that resumes, not only the last one.** A `claude -p` session that answers and then resumes (typically a background subagent returning) emits one `result` event per segment. The stream parser kept only the last one, so the judge graded a follow-up like "the rewrite I showed above" without the rewrite, and docked points for content the user did see. Now the run output joins every segment's answer in order, each with the existing empty-result fallback to that segment's last assistant text. In the cenni-ai docs-plugin eval, 11 of 36 runs across two snapshots had more than one segment. Scores for multi-segment runs can go up, since the judge now sees the whole answer.
+- **Token usage of a resumed session is summed across segments.** Each `result` event reports the tokens of its own segment, and the parser overwrote them, so multi-segment runs under-reported tokens (one measured run: 3,857 recorded output tokens out of 23,045). `total_cost_usd` is cumulative and was already right; the parser now takes the highest value seen.
+- **`--rejudge` re-reads each run's output from its saved `transcript.jsonl`** before judging, so the two fixes above also reach snapshots recorded with an older parser, without re-running Claude. Rows copied in by `--baseline-from` / `--current-from` keep the source snapshot's transcript path (a copied baseline row points at `current/...`), so pass the same `--baseline-from` / `--current-from` to the rejudge and those rows resolve against their source snapshot; a run whose transcript can't be found keeps its stored output.
+
 ## 0.25.0 — 2026-07-28
 
 **Bug fixes:**
