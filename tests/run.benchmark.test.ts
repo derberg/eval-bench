@@ -310,8 +310,11 @@ describe('runBenchmark', () => {
     }
   });
 
-  it('reverts what claude wrote when the plugin is in a repository subfolder', async () => {
-    judgeMode = 'ok';
+  // A repository with the plugin in plugins/docs. fake-claude-writes.js then
+  // changes files in it, and runs as snapshot `s1`.
+  async function runWritesInSubfolderPlugin(
+    snapshotsDir: (plugin: string) => string,
+  ): Promise<{ top: string; plugin: string }> {
     const top = mkdtempSync(join(tmpdir(), 'ef-cleanup-'));
     const plugin = join(top, 'plugins', 'docs');
     await execa('git', ['init', '-q', '-b', 'main'], { cwd: top });
@@ -328,7 +331,7 @@ describe('runBenchmark', () => {
     const cfg = baseConfig();
     cfg.provider.extraArgs = [resolve('tests/fixtures/fake-claude-writes.js')];
     cfg.runs = { samples: 1, parallel: 1 };
-    cfg.snapshots.dir = join(plugin, '.eval-bench', 'snapshots');
+    cfg.snapshots.dir = snapshotsDir(plugin);
     await runBenchmark({
       config: cfg,
       prompts,
@@ -338,9 +341,17 @@ describe('runBenchmark', () => {
       baselineSha: '',
       currentRef: 'HEAD',
       currentSha: 'def',
-      name: 'test-subfolder-cleanup',
+      name: 's1',
       variants: ['current'],
     });
+    return { top, plugin };
+  }
+
+  it('reverts what claude wrote when the plugin is in a repository subfolder', async () => {
+    judgeMode = 'ok';
+    const { top, plugin } = await runWritesInSubfolderPlugin((p) =>
+      join(p, '.eval-bench', 'snapshots'),
+    );
 
     expect(readFileSync(join(plugin, 'f'), 'utf8')).toBe('original');
     expect(existsSync(join(plugin, 'new.md'))).toBe(false);
@@ -350,10 +361,18 @@ describe('runBenchmark', () => {
     // The cleanup covers the plugin folder only. A snapshot saved elsewhere in
     // the repository during the run stays.
     expect(existsSync(join(top, 'snaps', 's1', 'transcript.jsonl'))).toBe(true);
-    // The snapshots folder inside the plugin folder is not cleaned up either.
+    // The run's snapshot inside the plugin folder is not cleaned up either.
     expect(existsSync(join(plugin, '.eval-bench', 'snapshots', 's1', 'transcript.jsonl'))).toBe(
       true,
     );
+  });
+
+  it('still reverts what claude wrote when snapshots.dir is the plugin folder', async () => {
+    judgeMode = 'ok';
+    const { plugin } = await runWritesInSubfolderPlugin((p) => p);
+
+    expect(readFileSync(join(plugin, 'f'), 'utf8')).toBe('original');
+    expect(existsSync(join(plugin, 'new.md'))).toBe(false);
   });
 
   it('skips already-completed rows when resuming', async () => {

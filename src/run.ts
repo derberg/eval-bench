@@ -488,7 +488,8 @@ async function captureGitStatus(dir: string): Promise<Map<string, string>> {
       let p = line.slice(3).trim();
       // git quotes paths with special chars; strip surrounding quotes if present
       if (p.startsWith('"') && p.endsWith('"')) p = p.slice(1, -1);
-      map.set(join(top.trim(), p).replace(/\/+$/, ''), xy);
+      // Strip before join: on Windows join turns the trailing `/` into `\`.
+      map.set(join(top.trim(), p.replace(/\/+$/, '')), xy);
     }
     return map;
   } catch {
@@ -500,8 +501,9 @@ async function captureGitStatus(dir: string): Promise<Map<string, string>> {
 // dirty before the run (preserving any user-owned uncommitted changes).
 // Tracked-file modifications are restored via `git checkout`; new untracked
 // files/dirs are deleted outright.
-// `keep` is the snapshots folder. When it sits inside the plugin folder, as
-// `eb init` sets it up, git lists the run's own new transcripts as untracked,
+// `keep` is this run's snapshot folder (snapshots.dir/<name>), where the run
+// saves its transcripts, snapshot.json and debug log. When it sits inside the
+// plugin folder, as `eb init` sets it up, git lists those files as untracked,
 // so paths in it, and folders that contain it, are never removed.
 async function resetClaudeWrites(
   dir: string,
@@ -687,7 +689,7 @@ async function runAndJudge(
     }
     // Revert what Claude wrote to the plugin dir so the next sample starts clean.
     if (absolutePluginDir) {
-      const keep = realpathOfNearest(resolvePath(opts.config.snapshots.dir));
+      const keep = realpathOfNearest(resolvePath(opts.config.snapshots.dir, opts.name));
       await resetClaudeWrites(absolutePluginDir, beforeGitStatus, keep).catch(() => {});
     }
     // Revert any writes Claude made to locations outside both claudeCwd and
