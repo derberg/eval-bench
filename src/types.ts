@@ -24,6 +24,13 @@ export interface Config {
     // snapshot's own dir; set explicitly to null to opt out and inherit the
     // parent process cwd (legacy behavior).
     cwd: string | null;
+    // Load only the plugin under test (default true): user plugins from
+    // ~/.claude and the claude.ai connectors stay out of the session.
+    isolation: boolean;
+    // Keep the claude.ai connectors while isolated. Default false.
+    claudeAiConnectors: boolean;
+    // More plugin directories to load next to the plugin under test.
+    extraPlugins: string[];
   };
   judge: {
     provider: JudgeProvider;
@@ -37,6 +44,11 @@ export interface Config {
     // src/judges/rubric.ts. Templates must contain {{prompt}}, {{output}},
     // and {{rubric}} placeholders or the run errors before any judge call.
     template: string | null;
+    // claude-cli only. isolation (default true) starts the judge without user
+    // plugins, MCP servers, and hooks. extraArgs go before the isolation
+    // flags; a --setting-sources there replaces the judge's own.
+    isolation: boolean;
+    extraArgs: string[];
   };
   runs: {
     samples: number;

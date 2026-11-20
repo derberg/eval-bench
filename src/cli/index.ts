@@ -22,6 +22,11 @@ program
   .command('run')
   .description('Run a benchmark against the plugin.')
   .option('--plugin <path>', 'Path to plugin')
+  .option(
+    '--with-plugin <path>',
+    'Load another plugin next to the plugin under test (repeatable). By default only the plugin under test loads.',
+    (v: string, prev?: string[]) => (prev ? [...prev, v] : [v]),
+  )
   .option('--baseline <ref>', 'Git ref for baseline')
   .option('--baseline-from <name>', 'Reuse baseline runs from a saved snapshot instead of regenerating them')
   .option('--current <ref>', 'Git ref for current')
@@ -70,6 +75,7 @@ program
     const code = await runCommand({
       cwd: process.cwd(),
       plugin: opts.plugin,
+      withPlugin: opts.withPlugin,
       baseline: opts.baseline,
       baselineFrom: opts.baselineFrom,
       current: opts.current,
@@ -107,6 +113,11 @@ program
   .requiredOption('--save-as <name>', 'Save snapshot under this name')
   .option('--ref <ref>', 'Git ref to evaluate', 'HEAD')
   .option('--plugin <path>', 'Path to plugin')
+  .option(
+    '--with-plugin <path>',
+    'Load another plugin next to the plugin under test (repeatable). By default only the plugin under test loads.',
+    (v: string, prev?: string[]) => (prev ? [...prev, v] : [v]),
+  )
   .option('--prompts <file>', 'Prompts file', './.eval-bench/prompts.yaml')
   .option('--config <file>', 'Config file', './.eval-bench/eval-bench.yaml')
   .option('--judge <spec>', 'Override judge, e.g. ollama:qwen2.5:14b')
@@ -131,6 +142,7 @@ program
     const code = await evalCommand({
       cwd: process.cwd(),
       plugin: opts.plugin,
+      withPlugin: opts.withPlugin,
       ref: opts.ref,
       prompts: opts.prompts,
       config: opts.config,

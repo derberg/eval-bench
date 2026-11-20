@@ -27,16 +27,42 @@ provider:
   model: claude-opus-4-7   # passed via --model; null for default
   allowedTools: null       # array of tool names, or null (default)
   cwd: "{{snapshots_dir}}/{{snapshot_name}}/{{variant}}/{{prompt_id}}/{{sample}}"  # default
+  isolation: true          # load only the plugin under test; see Session isolation
+  claudeAiConnectors: false
+  extraPlugins: []
 ```
 
-#### Session isolation — strongly recommended `extraArgs`
+#### Session isolation
+
+By default, a run loads only the plugin under test, with its own `.mcp.json` servers and hooks. eval-bench adds `--setting-sources project` and sets `ENABLE_CLAUDEAI_MCP_SERVERS=false`, so the plugins, MCP servers, and `CLAUDE.md` in `~/.claude` stay out, and so do the claude.ai connectors of your account. If `extraArgs` already contains `--setting-sources`, eval-bench uses your value. To keep the connectors, set `claudeAiConnectors: true` or set `ENABLE_CLAUDEAI_MCP_SERVERS` in the environment, which always wins. A config from before 0.28 that has `extraArgs: ["--setting-sources", "project"]` keeps working, and you can delete that line.
+
+Isolation also skips the `env` and `apiKeyHelper` in `~/.claude/settings.json`. If you reach your model through them, for example on Bedrock or behind a proxy, set those variables in the shell that runs `eb`, or set `--setting-sources` in `extraArgs` yourself.
+
+Without isolation, the session inherits everything installed on the machine that runs the eval. In one measured case that meant 108 tools and 10 MCP servers in context instead of 42 and 2. That adds about 10k tokens to the context of every turn, makes scores depend on whose machine ran the eval, and lets unrelated tools leak into the outputs.
 
 ```yaml
 provider:
-  extraArgs: ["--setting-sources", "project"]
+  isolation: true            # default; false loads everything installed on the machine
+  claudeAiConnectors: false  # default; true keeps the claude.ai connectors
+  extraPlugins: []           # more plugin directories to load, each via --plugin-dir
 ```
 
-Without it, the benchmarked session inherits the runner machine's entire global Claude Code environment — every user-installed plugin and MCP server. In one measured case that meant 108 tools / 10 MCP servers in context instead of 42 / 2: roughly 10k extra initial-context tokens re-read on every turn (~10–20% higher cost per run), scores that depend on whose machine ran the eval, and unrelated tools leaking into outputs (judges have docked points for stray "unrelated MCP servers" notes). With `--setting-sources project`, only built-ins, the plugin under test (loaded via `--plugin-dir`), and the plugin's own `.mcp.json` servers are present. The `eb init` scaffold sets this by default; remove it only if your plugin genuinely depends on user-level settings.
+`--with-plugin <path>` on `eb run` and `eb eval` adds to `extraPlugins`. Repeat it for more than one plugin. Relative paths in both resolve against the `eb` process cwd. The run header lists what loads.
+
+eval-bench prints a warning when `--baseline-from`, `--current-from`, or a resumed snapshot reuses runs that were recorded with different isolation settings, because their scores are not comparable. It compares what reached the command line: the setting sources, the connectors, and the extra plugins. A snapshot from before 0.28 recorded the claude.ai connectors as on.
+
+The plugins built into Claude Code (`cc-plugin-*@builtin`) still load, as they do for every user.
+
+The `claude-cli` judge is isolated too, on its own settings. It starts with `--setting-sources ""`, `--strict-mcp-config`, `--settings '{"disableAllHooks":true}'`, and `ENABLE_CLAUDEAI_MCP_SERVERS=false`, so a hook from an installed plugin cannot replace the JSON verdict.
+
+```yaml
+judge:
+  provider: claude-cli
+  isolation: true    # default; false starts the judge with everything installed
+  extraArgs: []      # go before the isolation flags; a --setting-sources or --settings here replaces the judge's own
+```
+
+If the judge needs `env` or `apiKeyHelper` from your user settings, set `extraArgs: ["--setting-sources", "user"]`. The judge then still runs without MCP servers and hooks.
 
 #### `cwd` — per-sample working directory
 

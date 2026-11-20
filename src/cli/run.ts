@@ -9,6 +9,7 @@ import { initDebug, noopDebug, type DebugLogger } from '../debug.js';
 import { readInlinePrompt } from './prompt-inline.js';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { validateJudgeTemplate } from '../judges/rubric.js';
+import { isolationMismatch, describeLoadedPlugins } from '../isolation.js';
 import { describePlugin, parseStreamJson } from '../provider.js';
 import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -17,6 +18,8 @@ import type { Config, PromptSpec, Snapshot, RunResult, Judgment, Variant } from 
 
 export interface RunOptions {
   cwd: string;
+  // More plugin directories to load next to the plugin under test.
+  withPlugin?: string[];
   plugin?: string;
   baseline?: string;
   baselineFrom?: string;
@@ -44,7 +47,7 @@ export interface RunOptions {
   verbose?: boolean;
 }
 
-function applyOverrides(cfg: Config, opts: RunOptions): Config {
+export function applyOverrides(cfg: Config, opts: RunOptions): Config {
   if (opts.timeout) cfg.provider.timeout = opts.timeout;
   if (opts.samples) cfg.runs.samples = opts.samples;
   if (opts.judge) {
@@ -62,6 +65,9 @@ function applyOverrides(cfg: Config, opts: RunOptions): Config {
   if (opts.plugin) {
     cfg.plugin.path = opts.plugin;
     cfg.plugin.gitRoot = opts.plugin;
+  }
+  if (opts.withPlugin?.length) {
+    cfg.provider.extraPlugins = [...cfg.provider.extraPlugins, ...opts.withPlugin];
   }
   return cfg;
 }
@@ -270,6 +276,8 @@ export async function runCommand(opts: RunOptions): Promise<number> {
 
   if (opts.baselineFrom) {
     const cached = await loadSnapshot(cfg.snapshots.dir, opts.baselineFrom);
+    const diff = opts.rejudge ? null : isolationMismatch(cached.config.provider, cfg.provider);
+    if (diff) warn(`--baseline-from "${opts.baselineFrom}" was ${diff}. Score changes can come from the environment.`);
     baselineRef = cached.plugin.currentRef || cached.plugin.baselineRef;
     baselineSha = cached.plugin.currentSha || cached.plugin.baselineSha;
     // Pull successful current-variant runs within the requested sample budget,
@@ -302,6 +310,8 @@ export async function runCommand(opts: RunOptions): Promise<number> {
 
   if (opts.currentFrom) {
     const cached = await loadSnapshot(cfg.snapshots.dir, opts.currentFrom);
+    const diff = opts.rejudge ? null : isolationMismatch(cached.config.provider, cfg.provider);
+    if (diff) warn(`--current-from "${opts.currentFrom}" was ${diff}. Score changes can come from the environment.`);
     currentRef = cached.plugin.currentRef || cached.plugin.baselineRef;
     currentSha = cached.plugin.currentSha || cached.plugin.baselineSha;
     // Same filter as baseline-from, but no variant remap: current-variant runs
@@ -350,6 +360,7 @@ export async function runCommand(opts: RunOptions): Promise<number> {
     info(`Current:  ${currentRef}`);
   }
   info(`Judge:    ${cfg.judge.provider}/${cfg.judge.model}`);
+  info(`Plugins:  ${describeLoadedPlugins(cfg)}`);
   info(
     `Matrix:   ${prompts.length} prompts × ${cfg.runs.samples} samples × ${variants.length} variant${variants.length === 1 ? '' : 's'} = ${prompts.length * cfg.runs.samples * variants.length} runs`,
   );
@@ -361,6 +372,8 @@ export async function runCommand(opts: RunOptions): Promise<number> {
 
   let resume: Snapshot | null = null;
   let existing: Snapshot | null = null;
+  // False when a resume only re-judges: no new runs join the old ones.
+  let resumeAddsRuns = true;
   // Where --rejudge looks for saved transcripts: this snapshot first, then the
   // sources it was stitched from.
   const transcriptDirs = [name, opts.baselineFrom, opts.currentFrom]
@@ -379,6 +392,7 @@ export async function runCommand(opts: RunOptions): Promise<number> {
         return 0;
       }
       resume = pruned.snap;
+      resumeAddsRuns = pruned.prunedRuns > 0;
       const parts: string[] = [];
       if (pruned.prunedRuns > 0)
         parts.push(`${pruned.prunedRuns} failed run${pruned.prunedRuns === 1 ? '' : 's'}`);
@@ -440,6 +454,12 @@ export async function runCommand(opts: RunOptions): Promise<number> {
   } else if (opts.refresh) {
     err(`No snapshot named "${name}" — nothing to refresh.`);
     return 1;
+  }
+  // --rejudge runs nothing new, so only a resume that adds runs can mix two
+  // environments in one snapshot.
+  if (resume && existing && !opts.rejudge && resumeAddsRuns) {
+    const diff = isolationMismatch(existing.config.provider, cfg.provider);
+    if (diff) warn(`Snapshot "${name}" was ${diff}. Its old and new runs will not be comparable.`);
   }
 
   if (cachedBaseline || cachedCurrent) {

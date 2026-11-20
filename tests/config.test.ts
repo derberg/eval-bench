@@ -27,6 +27,49 @@ judge:
     expect(cfg.snapshots.dir).toBe('./.eval-bench/snapshots');
   });
 
+  it('isolates the provider by default: no extra plugins, no claude.ai connectors', () => {
+    const path = writeTempYaml(`
+judge:
+  provider: claude-cli
+  model: sonnet
+`);
+    const cfg = loadConfig(path);
+    expect(cfg.provider.isolation).toBe(true);
+    expect(cfg.provider.claudeAiConnectors).toBe(false);
+    expect(cfg.provider.extraPlugins).toEqual([]);
+    expect(cfg.judge.isolation).toBe(true);
+    expect(cfg.judge.extraArgs).toEqual([]);
+  });
+
+  it('reads judge.isolation and judge.extraArgs', () => {
+    const path = writeTempYaml(`
+judge:
+  provider: claude-cli
+  model: sonnet
+  isolation: false
+  extraArgs: ["--setting-sources", "user"]
+`);
+    const cfg = loadConfig(path);
+    expect(cfg.judge.isolation).toBe(false);
+    expect(cfg.judge.extraArgs).toEqual(['--setting-sources', 'user']);
+  });
+
+  it('reads isolation, claudeAiConnectors, and extraPlugins from the provider block', () => {
+    const path = writeTempYaml(`
+provider:
+  isolation: false
+  claudeAiConnectors: true
+  extraPlugins: [../other-plugin]
+judge:
+  provider: claude-cli
+  model: sonnet
+`);
+    const cfg = loadConfig(path);
+    expect(cfg.provider.isolation).toBe(false);
+    expect(cfg.provider.claudeAiConnectors).toBe(true);
+    expect(cfg.provider.extraPlugins).toEqual(['../other-plugin']);
+  });
+
   it('rejects invalid judge provider', () => {
     const path = writeTempYaml(`
 judge:

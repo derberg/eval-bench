@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.28.0 — 2026-11-20
+
+**Behavior change (isolation by default):**
+
+- **A run loads only the plugin under test.** eval-bench now adds `--setting-sources project` itself and sets `ENABLE_CLAUDEAI_MCP_SERVERS=false`. Before, isolation depended on `extraArgs` in the config, and even with `--setting-sources project` the session still loaded the 11 claude.ai connectors of the account (Gmail, Drive, Atlassian and others). The plugin under test keeps its own MCP servers and hooks. If `extraArgs` already sets `--setting-sources`, your value wins. Drift snapshots recorded before this release ran with the connectors loaded, so the first comparison against them can show score changes that come from the environment alone.
+- **New `provider.isolation`, `provider.claudeAiConnectors`, `provider.extraPlugins` settings and a `--with-plugin <path>` flag** on `eb run` and `eb eval`. `extraPlugins` and `--with-plugin` load more plugins next to the plugin under test, each through its own `--plugin-dir`. `isolation: false` restores the old behavior. The `eb run` and `eb eval` headers list what loads.
+- **Isolation skips the `env` and `apiKeyHelper` in `~/.claude/settings.json`.** If you reach your model through them, set the variables in the shell, or set `--setting-sources` in `extraArgs` (`judge.extraArgs` for the judge). An `ENABLE_CLAUDEAI_MCP_SERVERS` in the environment always wins over eval-bench, on both sides.
+- **Configs scaffolded before 0.28** have `extraArgs: ["--setting-sources", "project"]`. They keep working and now also run without the claude.ai connectors. You can delete that line.
+- **A warning when reused runs were recorded with different isolation settings**, for `--baseline-from`, `--current-from`, and a resumed snapshot on `eb run` and `eb eval`. It compares the setting sources, the connectors, and the extra plugins. Re-judging alone does not warn.
+- **`eb adopt` keeps the isolation settings and `extraArgs`** of the snapshot it adopts.
+
+**Bug fixes:**
+
+- **The `claude-cli` judge no longer loads user plugins** (CENNSO-4548). The temp cwd kept project hooks out, but user-scope plugins in `~/.claude` still loaded, and a user plugin's Stop hook replaced the JSON verdict with its own message ("could not parse JSON"). The judge now starts with `--setting-sources ""`, `--strict-mcp-config`, `--settings '{"disableAllHooks":true}'` and `ENABLE_CLAUDEAI_MCP_SERVERS=false`. New `judge.isolation` and `judge.extraArgs` settings turn this off or replace the setting sources.
+
+The plugins built into Claude Code (`cc-plugin-*@builtin`) still load in both sessions, as they do for every user.
+
 ## 0.27.0 - 2026-11-20
 
 ### Bug fixes

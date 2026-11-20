@@ -1,6 +1,10 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createServer, type Server } from 'node:http';
-import { judge } from '../../src/judges/index.js';
+import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { judge, judgeConfigFromConfig } from '../../src/judges/index.js';
+import type { Config } from '../../src/types.js';
 
 let server: Server;
 let baseUrl = '';
@@ -82,5 +86,37 @@ describe('judge (dispatcher)', () => {
     );
     expect(r.score).toBe(3);
     delete process.env.TEST_KEY;
+  });
+  it('passes judge.extraArgs and judge.isolation to the claude-cli judge', async () => {
+    // A fake `claude` on PATH that reports its argv as the rationale.
+    const bin = mkdtempSync(join(tmpdir(), 'eb-fake-claude-'));
+    writeFileSync(
+      join(bin, 'claude'),
+      `#!/usr/bin/env node\nconsole.log(JSON.stringify({ score: 4, rationale: JSON.stringify(process.argv.slice(2)) }));\n`,
+    );
+    chmodSync(join(bin, 'claude'), 0o755);
+    const oldPath = process.env.PATH;
+    process.env.PATH = `${bin}:${oldPath}`;
+    try {
+      const cfg = judgeConfigFromConfig({
+        judge: {
+          provider: 'claude-cli',
+          model: 'sonnet',
+          endpoint: null,
+          apiKeyEnv: null,
+          temperature: 0,
+          maxTokens: 256,
+          template: null,
+          isolation: false,
+          extraArgs: ['--marker'],
+        },
+      } as unknown as Config);
+      const r = await judge(cfg, { prompt: 'p', output: 'o', rubric: 'r' });
+      const args = JSON.parse(r.rationale) as string[];
+      expect(args).toContain('--marker');
+      expect(args).not.toContain('--strict-mcp-config');
+    } finally {
+      process.env.PATH = oldPath;
+    }
   });
 });

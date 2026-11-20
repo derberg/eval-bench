@@ -617,6 +617,9 @@ async function runAndJudge(
       model: opts.config.provider.model,
       allowedTools: opts.config.provider.allowedTools,
       cwd: claudeCwd,
+      isolation: opts.config.provider.isolation,
+      claudeAiConnectors: opts.config.provider.claudeAiConnectors,
+      extraPlugins: opts.config.provider.extraPlugins,
       debug,
     });
     opts.onProgress?.({
