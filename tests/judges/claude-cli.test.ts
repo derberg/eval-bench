@@ -91,4 +91,82 @@ describe('judgeWithClaudeCli', () => {
     expect(r.score).toBe(4);
     expect(r.rationale).toBe('stdin-eof-received');
   });
+  it('starts the judge isolated: no user/project settings, no MCP servers, no hooks, no claude.ai connectors', async () => {
+    // A temp cwd keeps project hooks out, but user-scope plugins in ~/.claude
+    // still load. A user plugin's Stop hook then replaces the JSON verdict
+    // with its own message (CENNSO-4548). The judge needs no plugins at all.
+    const argsJudge = resolve('tests/fixtures/fake-claude-judge-args.js');
+    chmodSync(argsJudge, 0o755);
+    const r = await judgeWithClaudeCli({
+      command: 'node',
+      extraArgs: [argsJudge],
+      model: null,
+      timeoutMs: 5000,
+      prompt: 'p',
+      output: 'o',
+      rubric: 'r',
+    });
+    const seen = JSON.parse(r.rationale) as { args: string[]; claudeAiMcp: string | null };
+    const i = seen.args.indexOf('--setting-sources');
+    expect(i).toBeGreaterThanOrEqual(0);
+    expect(seen.args[i + 1]).toBe('');
+    expect(seen.args).toContain('--strict-mcp-config');
+    const s = seen.args.indexOf('--settings');
+    expect(JSON.parse(seen.args[s + 1])).toEqual({ disableAllHooks: true });
+    expect(seen.claudeAiMcp).toBe('false');
+  });
+  it('keeps a --settings from extraArgs instead of adding its own', async () => {
+    const argsJudge = resolve('tests/fixtures/fake-claude-judge-args.js');
+    chmodSync(argsJudge, 0o755);
+    const r = await judgeWithClaudeCli({
+      command: 'node',
+      extraArgs: [argsJudge, '--settings', 'mine.json'],
+      model: null,
+      timeoutMs: 5000,
+      prompt: 'p',
+      output: 'o',
+      rubric: 'r',
+    });
+    const seen = JSON.parse(r.rationale) as { args: string[] };
+    expect(seen.args.filter((a) => a === '--settings')).toHaveLength(1);
+    expect(seen.args).toContain('mine.json');
+  });
+
+  it('isolation: false starts the judge without isolation flags', async () => {
+    const argsJudge = resolve('tests/fixtures/fake-claude-judge-args.js');
+    chmodSync(argsJudge, 0o755);
+    const r = await judgeWithClaudeCli({
+      command: 'node',
+      extraArgs: [argsJudge],
+      isolation: false,
+      model: null,
+      timeoutMs: 5000,
+      prompt: 'p',
+      output: 'o',
+      rubric: 'r',
+    });
+    const seen = JSON.parse(r.rationale) as { args: string[]; claudeAiMcp: string | null };
+    expect(seen.args).not.toContain('--setting-sources');
+    expect(seen.args).not.toContain('--strict-mcp-config');
+    expect(seen.args).not.toContain('--settings');
+  });
+
+  it('keeps the user --setting-sources from extraArgs and still blocks MCP servers and hooks', async () => {
+    const argsJudge = resolve('tests/fixtures/fake-claude-judge-args.js');
+    chmodSync(argsJudge, 0o755);
+    const r = await judgeWithClaudeCli({
+      command: 'node',
+      extraArgs: [argsJudge, '--setting-sources=user'],
+      model: null,
+      timeoutMs: 5000,
+      prompt: 'p',
+      output: 'o',
+      rubric: 'r',
+    });
+    const seen = JSON.parse(r.rationale) as { args: string[] };
+    expect(seen.args).not.toContain('--setting-sources');
+    expect(seen.args).toContain('--setting-sources=user');
+    expect(seen.args).toContain('--strict-mcp-config');
+  });
+
 });

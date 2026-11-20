@@ -5,6 +5,7 @@ import { tmpdir, homedir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import type { RunUsage, ToolCall } from './types.js';
 import type { DebugLogger } from './debug.js';
+import { settingSourcesArg } from './isolation.js';
 import { noopDebug } from './debug.js';
 
 export interface InvokeClaudeOptions {
@@ -18,6 +19,16 @@ export interface InvokeClaudeOptions {
   // Absolute path to spawn the provider in. Created if missing. Null = inherit
   // the parent process cwd (legacy behavior).
   cwd: string | null;
+  // Load only the plugin under test (default true). Adds
+  // `--setting-sources project` unless extraArgs already sets it, so user
+  // plugins from ~/.claude stay out. The plugins built into Claude Code
+  // (`cc-plugin-*@builtin`) still load, as they do for every user.
+  isolation?: boolean;
+  // Keep the claude.ai connectors (they come from the account, not from
+  // settings files). Default false: isolation turns them off.
+  claudeAiConnectors?: boolean;
+  // More plugin directories to load next to the plugin under test.
+  extraPlugins?: string[];
   debug?: DebugLogger;
 }
 
@@ -331,7 +342,20 @@ export async function invokeClaude(opts: InvokeClaudeOptions): Promise<InvokeCla
     // from a marketplace. Without it, skills/agents silently resolve to the
     // installed copy (~/.claude/plugins/cache/...), so working-tree edits are
     // never exercised. EVAL_BENCH_PLUGIN_DIR stays exported for mock providers.
-    const args = [...opts.extraArgs, ...formatArgs, '--plugin-dir', effectivePluginDir, '-p', opts.prompt];
+    const isolation = opts.isolation ?? true;
+    const userSetsSources = settingSourcesArg(opts.extraArgs) !== null;
+    const isolationArgs = isolation && !userSetsSources ? ['--setting-sources', 'project'] : [];
+    const extraPluginArgs = (opts.extraPlugins ?? []).flatMap((p) => ['--plugin-dir', resolvePath(p)]);
+    const args = [
+      ...opts.extraArgs,
+      ...formatArgs,
+      ...isolationArgs,
+      '--plugin-dir',
+      effectivePluginDir,
+      ...extraPluginArgs,
+      '-p',
+      opts.prompt,
+    ];
     if (opts.model) {
       args.push('--model', opts.model);
     }
@@ -366,6 +390,12 @@ export async function invokeClaude(opts: InvokeClaudeOptions): Promise<InvokeCla
         env: {
           ...process.env,
           EVAL_BENCH_PLUGIN_DIR: effectivePluginDir,
+          // The environment wins when it already sets the variable.
+          ...(isolation &&
+          !opts.claudeAiConnectors &&
+          process.env.ENABLE_CLAUDEAI_MCP_SERVERS === undefined
+            ? { ENABLE_CLAUDEAI_MCP_SERVERS: 'false' }
+            : {}),
         },
         // The prompt is passed via the provider's -p / equivalent flag;
         // nothing piped via stdin. Default `pipe` makes claude CLI wait/warn.

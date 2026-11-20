@@ -409,4 +409,28 @@ describe('runBenchmark', () => {
     expect(second.judgments).toHaveLength(4);
     expect(second.complete).toBe(true);
   });
+  it('passes provider isolation settings and extra plugins to each run', async () => {
+    judgeMode = 'ok';
+    const fakeArgs = resolve('tests/fixtures/fake-claude-args.js');
+    chmodSync(fakeArgs, 0o755);
+    const cfg = baseConfig();
+    cfg.provider.extraArgs = [fakeArgs];
+    cfg.provider.isolation = false;
+    cfg.provider.extraPlugins = ['/tmp/extra-plugin'];
+    cfg.runs = { samples: 1, parallel: 1 };
+    const snap = await runBenchmark({
+      config: cfg,
+      prompts,
+      baselinePluginDir: '/tmp/a',
+      currentPluginDir: '/tmp/b',
+      baselineRef: 'v1',
+      baselineSha: 'abc',
+      currentRef: 'HEAD',
+      currentSha: 'def',
+      name: 'test-isolation-wiring',
+    });
+    const args = (JSON.parse(snap.runs[0].output) as { args: string[] }).args;
+    expect(args).not.toContain('--setting-sources');
+    expect(args).toContain('/tmp/extra-plugin');
+  });
 });

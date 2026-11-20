@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { chmodSync, existsSync, mkdtempSync, readFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -154,6 +154,99 @@ describe('invokeClaude', () => {
     });
     expect(r.exitCode).not.toBe(0);
     expect(r.error).toMatch(/timed out|killed|SIGTERM/i);
+  });
+});
+
+describe('invokeClaude isolation', () => {
+  // These tests read ENABLE_CLAUDEAI_MCP_SERVERS in the child, so start each
+  // one without it and put the outer value back afterwards.
+  const outerEnv = process.env.ENABLE_CLAUDEAI_MCP_SERVERS;
+  beforeEach(() => {
+    delete process.env.ENABLE_CLAUDEAI_MCP_SERVERS;
+  });
+  afterEach(() => {
+    if (outerEnv === undefined) delete process.env.ENABLE_CLAUDEAI_MCP_SERVERS;
+    else process.env.ENABLE_CLAUDEAI_MCP_SERVERS = outerEnv;
+  });
+  const fakeArgs = resolve('tests/fixtures/fake-claude-args.js');
+  chmodSync(fakeArgs, 0o755);
+  const base = {
+    command: 'node',
+    prompt: 'p',
+    pluginDir: '/tmp/fake-plugin',
+    timeoutMs: 5000,
+    model: null,
+    allowedTools: null,
+    cwd: null,
+  };
+  const seen = (output: string) =>
+    JSON.parse(output) as { args: string[]; claudeAiMcp: string | null };
+  const pluginDirs = (args: string[]) =>
+    args.flatMap((a, i) => (a === '--plugin-dir' ? [args[i + 1]] : []));
+
+  it('by default loads only project settings and turns off claude.ai connectors', async () => {
+    const r = await invokeClaude({ ...base, extraArgs: [fakeArgs] });
+    const s = seen(r.output);
+    const i = s.args.indexOf('--setting-sources');
+    expect(s.args[i + 1]).toBe('project');
+    expect(s.claudeAiMcp).toBe('false');
+    // The plugin under test keeps its own MCP servers and hooks.
+    expect(s.args).not.toContain('--strict-mcp-config');
+    expect(s.args.join(' ')).not.toContain('disableAllHooks');
+  });
+
+  it('does not add --setting-sources when extraArgs already sets it', async () => {
+    const r = await invokeClaude({
+      ...base,
+      extraArgs: [fakeArgs, '--setting-sources', 'project,user'],
+    });
+    const s = seen(r.output);
+    expect(s.args.filter((a) => a === '--setting-sources')).toHaveLength(1);
+    expect(s.args[s.args.indexOf('--setting-sources') + 1]).toBe('project,user');
+  });
+
+  it('turns off the connectors for a config from before 0.28 that sets --setting-sources project itself', async () => {
+    const r = await invokeClaude({
+      ...base,
+      extraArgs: [fakeArgs, '--setting-sources=project'],
+    });
+    const s = seen(r.output);
+    expect(s.args).not.toContain('--setting-sources');
+    expect(s.claudeAiMcp).toBe('false');
+  });
+
+  it('keeps ENABLE_CLAUDEAI_MCP_SERVERS from the environment', async () => {
+    process.env.ENABLE_CLAUDEAI_MCP_SERVERS = 'true';
+    try {
+      const r = await invokeClaude({ ...base, extraArgs: [fakeArgs] });
+      expect(seen(r.output).claudeAiMcp).toBe('true');
+    } finally {
+      delete process.env.ENABLE_CLAUDEAI_MCP_SERVERS;
+    }
+  });
+
+  it('isolation: false adds no isolation flags and leaves connectors alone', async () => {
+    const r = await invokeClaude({ ...base, extraArgs: [fakeArgs], isolation: false });
+    const s = seen(r.output);
+    expect(s.args).not.toContain('--setting-sources');
+    expect(s.claudeAiMcp).toBeNull();
+  });
+
+  it('claudeAiConnectors: true keeps the claude.ai connectors on', async () => {
+    const r = await invokeClaude({ ...base, extraArgs: [fakeArgs], claudeAiConnectors: true });
+    const s = seen(r.output);
+    expect(s.args).toContain('--setting-sources');
+    expect(s.claudeAiMcp).toBeNull();
+  });
+
+  it('loads each extra plugin with its own absolute --plugin-dir', async () => {
+    const r = await invokeClaude({
+      ...base,
+      extraArgs: [fakeArgs],
+      extraPlugins: ['relative/other-plugin', '/abs/third'],
+    });
+    const dirs = pluginDirs(seen(r.output).args);
+    expect(dirs).toEqual(['/tmp/fake-plugin', resolve('relative/other-plugin'), '/abs/third']);
   });
 });
 

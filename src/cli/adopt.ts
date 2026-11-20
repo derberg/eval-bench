@@ -14,19 +14,30 @@ async function exists(p: string): Promise<boolean> {
   }
 }
 
-function generateConfig(snap: Snapshot): string {
+export function generateConfig(snap: Snapshot): string {
   const cfg = snap.config;
+  // Write only what differs from the defaults, so the adopted config runs
+  // the same environment the snapshot did. A snapshot from before 0.28 has
+  // no isolation fields and ran without isolation.
+  const p = cfg.provider;
+  const j = cfg.judge;
   const obj: Record<string, unknown> = {
     plugin: { path: './' },
     provider: {
-      command: cfg.provider.command,
-      timeout: cfg.provider.timeout,
-      ...(cfg.provider.model ? { model: cfg.provider.model } : {}),
+      command: p.command,
+      timeout: p.timeout,
+      ...(p.model ? { model: p.model } : {}),
+      ...(p.extraArgs?.length ? { extraArgs: p.extraArgs } : {}),
+      ...(p.isolation === true ? {} : { isolation: false }),
+      ...(p.claudeAiConnectors ? { claudeAiConnectors: true } : {}),
+      ...(p.extraPlugins?.length ? { extraPlugins: p.extraPlugins } : {}),
     },
     judge: {
       provider: snap.judge.provider,
       model: snap.judge.model,
-      ...(cfg.judge.endpoint ? { endpoint: cfg.judge.endpoint } : {}),
+      ...(j.endpoint ? { endpoint: j.endpoint } : {}),
+      ...(j.isolation === false ? { isolation: false } : {}),
+      ...(j.extraArgs?.length ? { extraArgs: j.extraArgs } : {}),
     },
     runs: {
       samples: cfg.runs.samples,

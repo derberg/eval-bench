@@ -127,6 +127,9 @@ export function handleMissingConfig(
             model: null,
             allowedTools: null,
             cwd: '{{snapshots_dir}}/{{snapshot_name}}/{{variant}}/{{prompt_id}}/{{sample}}',
+            isolation: true,
+            claudeAiConnectors: false,
+            extraPlugins: [],
           },
           judge: {
             provider: provider as JudgeProvider,
@@ -135,6 +138,8 @@ export function handleMissingConfig(
             apiKeyEnv: null,
             temperature: 0,
             maxTokens: 1024,
+            isolation: true,
+            extraArgs: [],
             template: null,
           },
           runs: { samples: 3, parallel: 1 },

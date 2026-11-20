@@ -7,10 +7,13 @@ import { info, ok, warn, err, progress, step, judgeResult } from '../logger.js';
 import { validateJudgeTemplate } from '../judges/rubric.js';
 import { initDebug, noopDebug, type DebugLogger } from '../debug.js';
 import { describePlugin } from '../provider.js';
+import { isolationMismatch, describeLoadedPlugins, resolveExtraPlugins } from '../isolation.js';
 import type { Config, Snapshot } from '../types.js';
 
 export interface EvalOptions {
   cwd: string;
+  // More plugin directories to load next to the plugin under test.
+  withPlugin?: string[];
   plugin?: string;
   ref?: string;
   prompts?: string;
@@ -25,7 +28,14 @@ export interface EvalOptions {
   debug?: boolean;
 }
 
-function applyOverrides(cfg: Config, opts: EvalOptions): Config {
+// A resume that adds runs puts them next to runs recorded earlier, so say so
+// when the two loaded a different environment.
+function warnOnIsolationChange(existing: Snapshot, cfg: Config, name: string): void {
+  const diff = isolationMismatch(existing.config.provider, cfg.provider);
+  if (diff) warn(`Snapshot "${name}" was ${diff}. Its old and new runs will not be comparable.`);
+}
+
+export function applyOverrides(cfg: Config, opts: EvalOptions): Config {
   if (opts.judge) {
     const [provider, ...rest] = opts.judge.split(':');
     cfg.judge.provider = provider as Config['judge']['provider'];
@@ -39,6 +49,10 @@ function applyOverrides(cfg: Config, opts: EvalOptions): Config {
     cfg.plugin.path = opts.plugin;
     cfg.plugin.gitRoot = opts.plugin;
   }
+  cfg.provider.extraPlugins = resolveExtraPlugins(
+    [...cfg.provider.extraPlugins, ...(opts.withPlugin ?? [])],
+    warn,
+  );
   return cfg;
 }
 
@@ -64,6 +78,7 @@ export async function evalCommand(opts: EvalOptions): Promise<number> {
   }
   info(`Ref:      ${ref}`);
   info(`Judge:    ${cfg.judge.provider}/${cfg.judge.model}`);
+  info(`Plugins:  ${describeLoadedPlugins(cfg)}`);
   info(`Matrix:   ${prompts.length} prompts × ${cfg.runs.samples} samples = ${prompts.length * cfg.runs.samples} runs`);
   if (opts.dryRun) return 0;
 
@@ -82,6 +97,7 @@ export async function evalCommand(opts: EvalOptions): Promise<number> {
         return 0;
       }
       resume = pruned.snap;
+      if (pruned.prunedRuns > 0) warnOnIsolationChange(existing, cfg, name);
       const parts: string[] = [];
       if (pruned.prunedRuns > 0)
         parts.push(`${pruned.prunedRuns} failed run${pruned.prunedRuns === 1 ? '' : 's'}`);
@@ -94,6 +110,7 @@ export async function evalCommand(opts: EvalOptions): Promise<number> {
       );
     } else if (existing.complete === false) {
       resume = existing;
+      warnOnIsolationChange(existing, cfg, name);
       info(
         `Resuming from partial snapshot: ${existing.runs.length} runs, ${existing.judgments.length} judgments already done`,
       );

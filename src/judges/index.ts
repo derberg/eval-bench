@@ -26,6 +26,10 @@ export interface JudgeConfig {
   // null = DEFAULT_TEMPLATE in rubric.ts. Set via judge.template in
   // eval-bench.yaml or --judge-template <path> on the CLI.
   template: string | null;
+  // claude-cli only: extra CLI args, and whether to start the judge without
+  // user plugins, MCP servers, and hooks (default true).
+  extraArgs?: string[];
+  isolation?: boolean;
 }
 
 export type JudgeResult = Omit<Judgment, 'runId'> & {
@@ -139,6 +143,8 @@ export async function judge(
     case 'claude-cli':
       res = await judgeWithClaudeCli({
         model: cfg.model,
+        extraArgs: cfg.extraArgs,
+        isolation: cfg.isolation,
         template,
         ...input,
       });
@@ -165,5 +171,7 @@ export function judgeConfigFromConfig(cfg: Config): JudgeConfig {
     temperature: cfg.judge.temperature,
     maxTokens: cfg.judge.maxTokens,
     template: cfg.judge.template,
+    extraArgs: cfg.judge.extraArgs,
+    isolation: cfg.judge.isolation,
   };
 }

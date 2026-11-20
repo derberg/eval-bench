@@ -23,6 +23,9 @@ const ConfigSchema = z
           .string()
           .nullable()
           .default('{{snapshots_dir}}/{{snapshot_name}}/{{variant}}/{{prompt_id}}/{{sample}}'),
+        isolation: z.boolean().default(true),
+        claudeAiConnectors: z.boolean().default(false),
+        extraPlugins: z.array(z.string()).default([]),
       })
       .default({}),
     judge: z.object({
@@ -41,6 +44,8 @@ const ConfigSchema = z
       temperature: z.number().default(0),
       maxTokens: z.number().int().positive().default(1024),
       template: z.string().nullable().default(null),
+      isolation: z.boolean().default(true),
+      extraArgs: z.array(z.string()).default([]),
     }),
     runs: z
       .object({
