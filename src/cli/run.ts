@@ -2,12 +2,12 @@ import { loadConfig } from '../config.js';
 import { loadPrompts, filterPrompts } from '../prompts.js';
 import { runBenchmark } from '../run.js';
 import { saveSnapshot, loadSnapshot, pruneFailedRuns } from '../snapshot.js';
-import { createWorktree, resolveSha } from '../swap.js';
+import { createWorktree, pluginPathInRepo, resolveSha } from '../swap.js';
 import { compareSnapshots, formatComparisonMarkdown } from '../compare.js';
 import { info, ok, warn, err, progress, step, judgeResult } from '../logger.js';
 import { initDebug, noopDebug, type DebugLogger } from '../debug.js';
 import { readInlinePrompt } from './prompt-inline.js';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { validateJudgeTemplate } from '../judges/rubric.js';
 import { describePlugin, parseStreamJson } from '../provider.js';
 import { readFile } from 'node:fs/promises';
@@ -512,6 +512,15 @@ export async function runCommand(opts: RunOptions): Promise<number> {
   // (--prompt-inline) or when baseline runs are coming from a cached snapshot.
   const baselineWt =
     !variants.includes('baseline') || cachedBaseline ? null : await createWorktree(gitRoot, baselineRef);
+  // The worktree holds the whole repository. When the plugin is in a subfolder
+  // such as plugins/docs, the top of the worktree has no .claude-plugin/.
+  let baselinePluginDir = '';
+  if (baselineWt) {
+    baselinePluginDir = join(baselineWt.path, await pluginPathInRepo(cfg.plugin.path));
+    if (!existsSync(baselinePluginDir)) {
+      warn(`Baseline ${baselineRef} has no plugin folder at ${baselinePluginDir}`);
+    }
+  }
 
   let debug: DebugLogger = noopDebug();
   if (opts.debug) {
@@ -553,8 +562,8 @@ export async function runCommand(opts: RunOptions): Promise<number> {
     const snap = await runBenchmark({
       config: cfg,
       prompts,
-      baselinePluginDir: baselineWt?.path ?? '',
-      currentPluginDir: cachedCurrent ? '' : gitRoot,
+      baselinePluginDir,
+      currentPluginDir: cachedCurrent ? '' : cfg.plugin.path,
       baselineRef,
       baselineSha,
       currentRef,
