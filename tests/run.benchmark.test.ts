@@ -328,6 +328,7 @@ describe('runBenchmark', () => {
     const cfg = baseConfig();
     cfg.provider.extraArgs = [resolve('tests/fixtures/fake-claude-writes.js')];
     cfg.runs = { samples: 1, parallel: 1 };
+    cfg.snapshots.dir = join(plugin, '.eval-bench', 'snapshots');
     await runBenchmark({
       config: cfg,
       prompts,
@@ -343,10 +344,16 @@ describe('runBenchmark', () => {
 
     expect(readFileSync(join(plugin, 'f'), 'utf8')).toBe('original');
     expect(existsSync(join(plugin, 'new.md'))).toBe(false);
-    expect(existsSync(join(top, 'skills'))).toBe(false);
     // git lists the top-level skills/ as untracked. It must not be mapped onto
     // the plugin's own tracked skills/ folder.
     expect(existsSync(join(plugin, 'skills', 's.md'))).toBe(true);
+    // The cleanup covers the plugin folder only. A snapshot saved elsewhere in
+    // the repository during the run stays.
+    expect(existsSync(join(top, 'snaps', 's1', 'transcript.jsonl'))).toBe(true);
+    // The snapshots folder inside the plugin folder is not cleaned up either.
+    expect(existsSync(join(plugin, '.eval-bench', 'snapshots', 's1', 'transcript.jsonl'))).toBe(
+      true,
+    );
   });
 
   it('skips already-completed rows when resuming', async () => {
