@@ -41,14 +41,16 @@ function cfg(extraPlugins: string[]): Config {
 }
 
 describe('--with-plugin', () => {
-  it('eb run appends each --with-plugin path to provider.extraPlugins', () => {
-    const out = applyRunOverrides(cfg(['from-config']), { cwd: '.', withPlugin: ['a', 'b'] });
-    expect(out.provider.extraPlugins).toEqual(['from-config', 'a', 'b']);
+  it('eb run appends each --with-plugin path to provider.extraPlugins, resolved to a full path', () => {
+    // Stored resolved, so a snapshot, the isolation warning, and eb adopt
+    // name the same folder whatever directory eb runs from later.
+    const out = applyRunOverrides(cfg(['from-config']), { cwd: '.', withPlugin: ['a', '/abs/b'] });
+    expect(out.provider.extraPlugins).toEqual([resolve('from-config'), resolve('a'), '/abs/b']);
   });
 
   it('eb eval appends each --with-plugin path to provider.extraPlugins', () => {
     const out = applyEvalOverrides(cfg([]), { cwd: '.', saveAs: 's', withPlugin: ['a'] });
-    expect(out.provider.extraPlugins).toEqual(['a']);
+    expect(out.provider.extraPlugins).toEqual([resolve('a')]);
   });
 });
 
@@ -72,6 +74,7 @@ describe('eb run --with-plugin (CLI parsing)', () => {
     expect(exitCode).toBe(0);
     expect(stdout).toContain('/p/one');
     expect(stdout).toContain('/p/two');
+    expect(stdout).toMatch(/Extra plugin folder not found: \/p\/one/);
   }, 60_000);
   it('eb eval prints the extra plugins in its header too', async () => {
     const root = mkdtempSync(join(tmpdir(), 'ef-withplugin-eval-'));

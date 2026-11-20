@@ -47,7 +47,9 @@ provider:
   extraPlugins: []           # more plugin directories to load, each via --plugin-dir
 ```
 
-`--with-plugin <path>` on `eb run` and `eb eval` adds to `extraPlugins`. Repeat it for more than one plugin. Relative paths in both resolve against the `eb` process cwd. The run header lists what loads.
+`--with-plugin <path>` on `eb run` and `eb eval` adds to `extraPlugins`. Repeat it for more than one plugin. Relative paths in both resolve against the `eb` process cwd, and the snapshot records the full path. eval-bench warns when a folder does not exist. The run header lists what loads.
+
+Extra plugins load from the folder as it is now, on both sides. The baseline does not check out an older version of them. If your change also edits an extra plugin, the comparison does not show that part.
 
 eval-bench prints a warning when `--baseline-from`, `--current-from`, or a resumed snapshot reuses runs that were recorded with different isolation settings, because their scores are not comparable. It compares what reached the command line: the setting sources, the connectors, and the extra plugins. A snapshot from before 0.28 recorded the claude.ai connectors as on.
 

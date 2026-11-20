@@ -9,7 +9,7 @@ import { initDebug, noopDebug, type DebugLogger } from '../debug.js';
 import { readInlinePrompt } from './prompt-inline.js';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { validateJudgeTemplate } from '../judges/rubric.js';
-import { isolationMismatch, describeLoadedPlugins } from '../isolation.js';
+import { isolationMismatch, describeLoadedPlugins, resolveExtraPlugins } from '../isolation.js';
 import { describePlugin, parseStreamJson } from '../provider.js';
 import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -66,9 +66,10 @@ export function applyOverrides(cfg: Config, opts: RunOptions): Config {
     cfg.plugin.path = opts.plugin;
     cfg.plugin.gitRoot = opts.plugin;
   }
-  if (opts.withPlugin?.length) {
-    cfg.provider.extraPlugins = [...cfg.provider.extraPlugins, ...opts.withPlugin];
-  }
+  cfg.provider.extraPlugins = resolveExtraPlugins(
+    [...cfg.provider.extraPlugins, ...(opts.withPlugin ?? [])],
+    warn,
+  );
   return cfg;
 }
 

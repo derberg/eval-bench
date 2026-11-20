@@ -7,7 +7,7 @@ import { info, ok, warn, err, progress, step, judgeResult } from '../logger.js';
 import { validateJudgeTemplate } from '../judges/rubric.js';
 import { initDebug, noopDebug, type DebugLogger } from '../debug.js';
 import { describePlugin } from '../provider.js';
-import { isolationMismatch, describeLoadedPlugins } from '../isolation.js';
+import { isolationMismatch, describeLoadedPlugins, resolveExtraPlugins } from '../isolation.js';
 import type { Config, Snapshot } from '../types.js';
 
 export interface EvalOptions {
@@ -49,9 +49,10 @@ export function applyOverrides(cfg: Config, opts: EvalOptions): Config {
     cfg.plugin.path = opts.plugin;
     cfg.plugin.gitRoot = opts.plugin;
   }
-  if (opts.withPlugin?.length) {
-    cfg.provider.extraPlugins = [...cfg.provider.extraPlugins, ...opts.withPlugin];
-  }
+  cfg.provider.extraPlugins = resolveExtraPlugins(
+    [...cfg.provider.extraPlugins, ...(opts.withPlugin ?? [])],
+    warn,
+  );
   return cfg;
 }
 

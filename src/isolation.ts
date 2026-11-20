@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 // The provider settings that decide what loads into a run session, read from
@@ -31,6 +32,17 @@ function describe(s: IsolationSettings): string {
     connectorsOff ? 'claude.ai connectors off' : 'claude.ai connectors on',
     extras.length > 0 ? `extra plugins: ${extras.join(', ')}` : 'no extra plugins',
   ].join(', ');
+}
+
+// Resolves extra plugin paths against the eb process cwd, so a snapshot
+// records full paths, and warns about a folder that does not exist: claude
+// would start without that plugin.
+export function resolveExtraPlugins(paths: string[], warn: (msg: string) => void): string[] {
+  return paths.map((p) => {
+    const abs = resolve(p);
+    if (!existsSync(abs)) warn(`Extra plugin folder not found: ${abs}`);
+    return abs;
+  });
 }
 
 // One line for the run header: what loads next to the built-in tools.
