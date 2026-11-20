@@ -1,5 +1,13 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { chmodSync, existsSync, mkdtempSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
+import { execa } from 'execa';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createServer, type Server } from 'node:http';
@@ -243,8 +251,7 @@ describe('runBenchmark', () => {
     const cfg = baseConfig();
     cfg.provider.extraArgs = [fakeClaudeCwd];
     // Default template, the same one zod applies when cwd is omitted.
-    cfg.provider.cwd =
-      '{{snapshots_dir}}/{{snapshot_name}}/{{variant}}/{{prompt_id}}/{{sample}}';
+    cfg.provider.cwd = '{{snapshots_dir}}/{{snapshot_name}}/{{variant}}/{{prompt_id}}/{{sample}}';
     cfg.snapshots.dir = snapsRoot;
     cfg.runs.samples = 1;
     const snap = await runBenchmark({
@@ -301,6 +308,45 @@ describe('runBenchmark', () => {
     for (const r of snap.runs) {
       expect(r.output).toContain(`[CWD=${process.cwd()}]`);
     }
+  });
+
+  it('reverts what claude wrote when the plugin is in a repository subfolder', async () => {
+    judgeMode = 'ok';
+    const top = mkdtempSync(join(tmpdir(), 'ef-cleanup-'));
+    const plugin = join(top, 'plugins', 'docs');
+    await execa('git', ['init', '-q', '-b', 'main'], { cwd: top });
+    await execa('git', ['config', 'user.email', 't@t'], { cwd: top });
+    await execa('git', ['config', 'user.name', 't'], { cwd: top });
+    mkdirSync(join(plugin, '.claude-plugin'), { recursive: true });
+    mkdirSync(join(plugin, 'skills'), { recursive: true });
+    writeFileSync(join(plugin, '.claude-plugin', 'plugin.json'), '{"name":"docs"}');
+    writeFileSync(join(plugin, 'skills', 's.md'), 'skill');
+    writeFileSync(join(plugin, 'f'), 'original');
+    await execa('git', ['add', '.'], { cwd: top });
+    await execa('git', ['commit', '-qm', 'v1'], { cwd: top });
+
+    const cfg = baseConfig();
+    cfg.provider.extraArgs = [resolve('tests/fixtures/fake-claude-writes.js')];
+    cfg.runs = { samples: 1, parallel: 1 };
+    await runBenchmark({
+      config: cfg,
+      prompts,
+      baselinePluginDir: '',
+      currentPluginDir: plugin,
+      baselineRef: '',
+      baselineSha: '',
+      currentRef: 'HEAD',
+      currentSha: 'def',
+      name: 'test-subfolder-cleanup',
+      variants: ['current'],
+    });
+
+    expect(readFileSync(join(plugin, 'f'), 'utf8')).toBe('original');
+    expect(existsSync(join(plugin, 'new.md'))).toBe(false);
+    expect(existsSync(join(top, 'skills'))).toBe(false);
+    // git lists the top-level skills/ as untracked. It must not be mapped onto
+    // the plugin's own tracked skills/ folder.
+    expect(existsSync(join(plugin, 'skills', 's.md'))).toBe(true);
   });
 
   it('skips already-completed rows when resuming', async () => {

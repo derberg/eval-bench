@@ -510,13 +510,15 @@ export async function runCommand(opts: RunOptions): Promise<number> {
 
   // Skip the worktree when the matrix excludes the baseline variant
   // (--prompt-inline) or when baseline runs are coming from a cached snapshot.
-  const baselineWt =
-    !variants.includes('baseline') || cachedBaseline ? null : await createWorktree(gitRoot, baselineRef);
+  const needBaselineWt = variants.includes('baseline') && !cachedBaseline;
   // The worktree holds the whole repository. When the plugin is in a subfolder
   // such as plugins/docs, the top of the worktree has no .claude-plugin/.
+  // Resolved before the worktree exists, so a failure leaves no worktree behind.
+  const pluginSubdir = needBaselineWt ? await pluginPathInRepo(cfg.plugin.path) : '';
+  const baselineWt = needBaselineWt ? await createWorktree(gitRoot, baselineRef) : null;
   let baselinePluginDir = '';
   if (baselineWt) {
-    baselinePluginDir = join(baselineWt.path, await pluginPathInRepo(cfg.plugin.path));
+    baselinePluginDir = join(baselineWt.path, pluginSubdir);
     if (!existsSync(baselinePluginDir)) {
       warn(`Baseline ${baselineRef} has no plugin folder at ${baselinePluginDir}`);
     }

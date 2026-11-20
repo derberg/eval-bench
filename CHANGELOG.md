@@ -8,6 +8,7 @@ All notable changes to this project will be documented in this file.
 
 - The baseline side now loads the plugin when the plugin is in a subfolder of its git repository, such as `plugins/docs`. Before, the baseline ran from the top of a worktree of the whole repository. That folder has no `.claude-plugin/`, so the baseline sessions started without the plugin. eval-bench now runs the baseline from the same subfolder inside the worktree, and prints a warning when the baseline ref has no folder at that path. Runs with `--baseline-from` were not affected.
 - `eb run` and `eb eval` load the current side from `plugin.path` instead of `plugin.gitRoot`. With `gitRoot` set to the repository root and `path` set to a subfolder, the current side loaded from the root and ran without the plugin.
+- After each run, eval-bench reverts what Claude changed in the plugin's repository. With the plugin in a subfolder, it joined the paths from `git status` onto the subfolder instead of the repository top. Changes in the plugin folder stayed in place for later runs. An untracked folder at the top, such as `skills/`, mapped onto the plugin folder of the same name, which eval-bench then deleted.
 
 ## 0.26.0 — 2026-10-27
 

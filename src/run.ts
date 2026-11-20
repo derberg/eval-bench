@@ -457,6 +457,9 @@ async function judgeRun(
 // Used to detect what Claude wrote so we can reset it after the run.
 async function captureGitStatus(dir: string): Promise<Map<string, string>> {
   try {
+    // Porcelain paths are relative to the top of the repository, not to `dir`,
+    // so a plugin in a subfolder needs the top to build the absolute path.
+    const { stdout: top } = await execa('git', ['rev-parse', '--show-toplevel'], { cwd: dir });
     const { stdout } = await execa('git', ['status', '--porcelain'], { cwd: dir });
     const map = new Map<string, string>();
     for (const line of stdout.split('\n').filter((l) => l.trim())) {
@@ -464,7 +467,7 @@ async function captureGitStatus(dir: string): Promise<Map<string, string>> {
       let p = line.slice(3).trim();
       // git quotes paths with special chars; strip surrounding quotes if present
       if (p.startsWith('"') && p.endsWith('"')) p = p.slice(1, -1);
-      map.set(join(dir, p), xy);
+      map.set(join(top.trim(), p), xy);
     }
     return map;
   } catch {
