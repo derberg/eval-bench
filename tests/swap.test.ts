@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { execa } from 'execa';
-import { mkdtempSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createWorktree, resolveSha } from '../src/swap.js';
+import { createWorktree, pluginPathInRepo, resolveSha } from '../src/swap.js';
 
 async function makeRepo(): Promise<{ root: string; sha1: string; sha2: string }> {
   const root = mkdtempSync(join(tmpdir(), 'ef-git-'));
@@ -38,5 +38,13 @@ describe('swap', () => {
   it('rejects a non-existent ref', async () => {
     const { root } = await makeRepo();
     await expect(createWorktree(root, 'does-not-exist')).rejects.toThrow();
+  });
+
+  it('gives the plugin path relative to the top of the repository', async () => {
+    const { root } = await makeRepo();
+    const sub = join(root, 'plugins', 'docs');
+    mkdirSync(sub, { recursive: true });
+    expect(await pluginPathInRepo(root)).toBe('');
+    expect(await pluginPathInRepo(sub)).toBe('plugins/docs');
   });
 });

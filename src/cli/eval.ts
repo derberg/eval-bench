@@ -153,7 +153,7 @@ export async function evalCommand(opts: EvalOptions): Promise<number> {
       config: cfg,
       prompts,
       baselinePluginDir: '',
-      currentPluginDir: gitRoot,
+      currentPluginDir: cfg.plugin.path,
       baselineRef: '',
       baselineSha: '',
       currentRef: ref,

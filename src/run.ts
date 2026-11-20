@@ -453,18 +453,43 @@ async function judgeRun(
   return judgment;
 }
 
+// realpath of `p`, also when `p` does not exist yet: resolves the nearest
+// folder that exists and appends the rest. git prints real paths, so a path
+// through a symlink, such as /var on macOS, must be resolved to compare.
+function realpathOfNearest(p: string): string {
+  let head = p;
+  const rest: string[] = [];
+  for (;;) {
+    try {
+      return join(realpathSync(head), ...rest);
+    } catch {
+      const parent = dirname(head);
+      if (parent === head) return p;
+      rest.unshift(basename(head));
+      head = parent;
+    }
+  }
+}
+
 // Returns a snapshot of which paths are dirty (modified or untracked) in `dir`.
 // Used to detect what Claude wrote so we can reset it after the run.
 async function captureGitStatus(dir: string): Promise<Map<string, string>> {
   try {
-    const { stdout } = await execa('git', ['status', '--porcelain'], { cwd: dir });
+    // Porcelain paths are relative to the top of the repository, not to `dir`,
+    // so a plugin in a subfolder needs the top to build the absolute path.
+    // The `.` pathspec keeps the list inside `dir`: without it, a run whose
+    // snapshot folder is elsewhere in the repository deletes the transcripts
+    // it just saved there.
+    const { stdout: top } = await execa('git', ['rev-parse', '--show-toplevel'], { cwd: dir });
+    const { stdout } = await execa('git', ['status', '--porcelain', '--', '.'], { cwd: dir });
     const map = new Map<string, string>();
     for (const line of stdout.split('\n').filter((l) => l.trim())) {
       const xy = line.slice(0, 2).trim();
       let p = line.slice(3).trim();
       // git quotes paths with special chars; strip surrounding quotes if present
       if (p.startsWith('"') && p.endsWith('"')) p = p.slice(1, -1);
-      map.set(join(dir, p), xy);
+      // Strip before join: on Windows join turns the trailing `/` into `\`.
+      map.set(join(top.trim(), p.replace(/\/+$/, '')), xy);
     }
     return map;
   } catch {
@@ -476,10 +501,19 @@ async function captureGitStatus(dir: string): Promise<Map<string, string>> {
 // dirty before the run (preserving any user-owned uncommitted changes).
 // Tracked-file modifications are restored via `git checkout`; new untracked
 // files/dirs are deleted outright.
-async function resetClaudeWrites(dir: string, before: Map<string, string>): Promise<void> {
+// `keep` is this run's snapshot folder (snapshots.dir/<name>), where the run
+// saves its transcripts, snapshot.json and debug log. When it sits inside the
+// plugin folder, as `eb init` sets it up, git lists those files as untracked,
+// so paths in it, and folders that contain it, are never removed.
+async function resetClaudeWrites(
+  dir: string,
+  before: Map<string, string>,
+  keep: string,
+): Promise<void> {
   const after = await captureGitStatus(dir);
   for (const [absPath, xy] of after) {
     if (before.has(absPath)) continue; // existed before the run — don't touch
+    if (absPath === keep || keep.startsWith(absPath + sep) || absPath.startsWith(keep + sep)) continue;
     if (xy === '??' || xy === '?') {
       // Untracked file or directory Claude created — remove it
       const s = await stat(absPath).catch(() => null);
@@ -655,7 +689,8 @@ async function runAndJudge(
     }
     // Revert what Claude wrote to the plugin dir so the next sample starts clean.
     if (absolutePluginDir) {
-      await resetClaudeWrites(absolutePluginDir, beforeGitStatus).catch(() => {});
+      const keep = realpathOfNearest(resolvePath(opts.config.snapshots.dir, opts.name));
+      await resetClaudeWrites(absolutePluginDir, beforeGitStatus, keep).catch(() => {});
     }
     // Revert any writes Claude made to locations outside both claudeCwd and
     // pluginDir (e.g. writing to an unrelated repo or /tmp path). In legacy

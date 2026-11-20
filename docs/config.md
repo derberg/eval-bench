@@ -13,7 +13,7 @@ plugin:
 ```
 
 - `path` — directory containing the plugin (`.claude-plugin/plugin.json` or skills/agents/etc).
-- `gitRoot` — git repo root for the plugin. Worktrees are created relative to this. Defaults to `plugin.path`.
+- `gitRoot` — git repo root for the plugin. Worktrees are created relative to this. Defaults to `plugin.path`. Both sides load the plugin from `plugin.path`. For the baseline, that is the same subfolder inside the worktree.
 
 ### provider
 
